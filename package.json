@@ -14,7 +14,11 @@
     "dev:stdio": "tsx src/bin/stdio.ts",
     "evals": "tsx evals/run.ts",
     "dev:http": "tsx src/bin/http.ts",
-    "conformance": "tsx evals/conformance.ts --expected-failures conformance-baseline.yml"
+    "conformance": "tsx evals/conformance.ts --expected-failures conformance-baseline.yml",
+    "typecheck:worker": "tsc -p tsconfig.worker.json",
+    "deploy": "wrangler deploy",
+    "dev:worker": "wrangler dev",
+    "smoke:worker": "tsx evals/worker-smoke.ts"
   },
   "keywords": [],
   "author": "",

@@ -4,7 +4,7 @@ import { type ExpenseLike, findDuplicates, fingerprint, toExpenseLike } from '..
 import { fromMinor, splitEqual, toMinor } from '../domain/money.js';
 import { parseExpenseSentence } from '../domain/parser.js';
 import type { Deps, PendingWrite } from '../server/deps.js';
-import { GROUP_URL, fail, fullName, joinNames, ok, untrusted } from '../server/format.js';
+import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, untrusted } from '../server/format.js';
 import { describeResolution, resolveMember } from '../server/resolve.js';
 import type { SwCreateExpenseByShares, SwExpense, SwUser } from '../splitwise/types.js';
 import { AddExpenseOutput, ConfirmSchema, NudgeOutput } from './schemas.js';
@@ -59,6 +59,8 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       annotations: WRITE,
     },
     async (args, ctx) => {
+      const denied = missingScope(ctx, 'add');
+      if (denied) return denied;
       const me = await deps.me();
       const pending = ctx.mcpReq.requestState<PendingWrite>();
 
@@ -219,6 +221,8 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       annotations: WRITE,
     },
     async (args, ctx) => {
+      const denied = missingScope(ctx, 'add');
+      if (denied) return denied;
       const me = await deps.me();
       const pending = ctx.mcpReq.requestState<PendingWrite>();
 

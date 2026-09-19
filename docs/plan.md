@@ -1,6 +1,10 @@
 # Plan
 
-Last updated: 2026-09-17
+Last updated: 2026-09-19
+
+## Status
+
+Weeks 1 to 3 of the schedule below are built as of 2026-09-19: domain logic with tests, the six tools, stdio and local HTTP entry points, the Cloudflare Worker with OAuth and scope tiers, deterministic evals, the conformance harness with a baseline, a Worker smoke test, and CI. Not done: a deploy against a real Splitwise app (needs the client id and secret), user interviews, the metrics dashboard with real numbers, and the week-4 items (App, demo video, retrospective). The build log records every problem hit so far.
 
 ## Goal
 

@@ -6,7 +6,7 @@ import { fromMinor, toMinor } from '../domain/money.js';
 import { settlePlan } from '../domain/settle.js';
 import { staleBalances } from '../domain/stale.js';
 import type { Deps } from '../server/deps.js';
-import { GROUP_URL, fail, fullName, ok, untrusted } from '../server/format.js';
+import { GROUP_URL, fail, fullName, missingScope, ok, untrusted } from '../server/format.js';
 import { describeResolution, resolveMember } from '../server/resolve.js';
 import type { SwGroup, SwUser } from '../splitwise/types.js';
 import { ExplainOutput, ReconcileOutput, SettleOutput, StaleOutput } from './schemas.js';
@@ -35,7 +35,9 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: ExplainOutput,
       annotations: READ,
     },
-    async ({ group_id, friend }) => {
+    async ({ group_id, friend }, ctx) => {
+      const denied = missingScope(ctx, 'read');
+      if (denied) return denied;
       const me = await deps.me();
       if (group_id === undefined && !friend) {
         return fail('Give a group_id, a friend, or both. Read splitwise://groups to see group ids and members.');
@@ -100,7 +102,9 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: StaleOutput,
       annotations: READ,
     },
-    async ({ older_than_days, group_id }) => {
+    async ({ older_than_days, group_id }, ctx) => {
+      const denied = missingScope(ctx, 'read');
+      if (denied) return denied;
       const me = await deps.me();
       const now = deps.now();
       const since = new Date(now.getTime() - 400 * 86_400_000).toISOString();
@@ -140,7 +144,9 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: SettleOutput,
       annotations: READ,
     },
-    async ({ group_id }) => {
+    async ({ group_id }, ctx) => {
+      const denied = missingScope(ctx, 'read');
+      if (denied) return denied;
       const group = await deps.group(group_id);
       const byId = new Map(group.members.map((m) => [m.id, m]));
       const currencies = new Set<string>();
@@ -198,7 +204,9 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: ReconcileOutput,
       annotations: READ,
     },
-    async ({ group_id, since_days, threshold }) => {
+    async ({ group_id, since_days, threshold }, ctx) => {
+      const denied = missingScope(ctx, 'read');
+      if (denied) return denied;
       const since = new Date(deps.now().getTime() - since_days * 86_400_000).toISOString();
       const expenses = (await deps.client.allExpenses({ group_id, dated_after: since })).filter((e) => !e.deleted_at && !e.payment);
       const clusters = findDuplicateClusters(expenses.map(toExpenseLike), threshold).map((m) => {

@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "fairsplit-mcp",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "kv_namespaces": [
+    { "binding": "OAUTH_KV", "id": "REPLACE_WITH_OAUTH_KV_ID" },
+    { "binding": "FAIRSPLIT_KV", "id": "REPLACE_WITH_FAIRSPLIT_KV_ID" }
+  ],
+  "vars": {
+    "ALLOWED_EMAILS": "",
+    "PUBLIC_HOST": ""
+  },
+  "observability": { "enabled": true }
+}
+// Secrets (set with `wrangler secret put <NAME>`), never in this file:
+//   SPLITWISE_CLIENT_ID, SPLITWISE_CLIENT_SECRET, FAIRSPLIT_STATE_KEY
+// Create the KV namespaces with `wrangler kv namespace create OAUTH_KV` and
+// `wrangler kv namespace create FAIRSPLIT_KV`, then paste the ids above.

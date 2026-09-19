@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Typecheck (Node entry points)
+        run: npm run typecheck
+      - name: Typecheck (Cloudflare Worker)
+        run: npm run typecheck:worker
+      - name: Unit and integration tests
+        run: npm test
+      - name: Deterministic evals
+        run: npm run evals
+      - name: MCP conformance suite against baseline
+        run: npm run conformance
+      - name: Worker smoke test (local wrangler)
+        run: npm run smoke:worker
+        env:
+          CI: "true"

@@ -1,6 +1,6 @@
 # ADR-0001: Six job-shaped tools, not an API mirror
 
-Status: proposed
+Status: accepted (2026-09-19)
 
 ## Context
 

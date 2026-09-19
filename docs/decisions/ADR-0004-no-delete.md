@@ -1,6 +1,6 @@
 # ADR-0004: No delete in v1
 
-Status: proposed
+Status: accepted (2026-09-19)
 
 ## Context
 

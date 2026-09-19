@@ -1,6 +1,6 @@
 # ADR-0002: Every write previews and waits for confirmation
 
-Status: proposed
+Status: accepted (2026-09-19)
 
 ## Context
 

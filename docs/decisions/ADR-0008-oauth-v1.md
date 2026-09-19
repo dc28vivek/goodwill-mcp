@@ -1,6 +1,6 @@
 # ADR-0008: Multi-user OAuth in v1, behind an allowlist
 
-Status: proposed
+Status: accepted (2026-09-19)
 
 ## Context
 

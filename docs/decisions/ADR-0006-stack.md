@@ -1,6 +1,6 @@
 # ADR-0006: TypeScript, v2 MCP packages, Cloudflare Workers
 
-Status: proposed
+Status: accepted (2026-09-19)
 
 ## Context
 

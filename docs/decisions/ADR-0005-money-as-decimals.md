@@ -1,6 +1,6 @@
 # ADR-0005: Money as decimal strings, never floats
 
-Status: proposed
+Status: accepted (2026-09-19)
 
 ## Context
 

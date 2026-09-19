@@ -1,6 +1,6 @@
 # ADR-0007: Deterministic parser first, model second
 
-Status: proposed
+Status: accepted (2026-09-19)
 
 ## Context
 
