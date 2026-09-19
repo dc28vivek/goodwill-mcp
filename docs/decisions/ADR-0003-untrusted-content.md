@@ -17,4 +17,4 @@ The server wraps all fetched text as data. Tool descriptions tell the model that
 ## Consequences
 
 - Some prompt-injection evals must exist in the eval set.
-- The threat model in `SECURITY.md` names this as the top risk.
+- The threat model in [`SECURITY.md`](../../SECURITY.md) names this as the top risk.

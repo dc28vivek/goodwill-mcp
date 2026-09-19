@@ -12,7 +12,7 @@ Ship six tools named after jobs: `explain_balance`, `stale_balances`, `add_expen
 
 ## Alternatives
 
-- Mirror the API. Rejected: proven not to help, see `research/teardown.md`.
+- Mirror the API. Rejected: a teardown of about 30 unofficial Splitwise MCP servers found they all do this and none are usable by a non-technical person.
 - Two tools, "read" and "write," with a free-form action string. Rejected: loses schema validation and annotations.
 
 ## Consequences

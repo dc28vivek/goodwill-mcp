@@ -12,9 +12,9 @@ v1 ships the hosted server as an OAuth 2.1 resource server with a token vault, C
 
 ## Alternatives
 
-- Single-user only. Kept as the cut if week 3 slips (see the cut order in `plan.md`).
+- Single-user only. Kept as the fallback if the hosted work slips.
 
 ## Consequences
 
 - Week 3 is auth work.
-- `SECURITY.md` must document custody, revocation, and the allowlist.
+- [`SECURITY.md`](../../SECURITY.md) documents custody, revocation, and the allowlist.
