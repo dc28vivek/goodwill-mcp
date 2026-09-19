@@ -1,6 +1,6 @@
 # PRD: fairsplit-mcp v1
 
-Status: draft v0. The tool surface and flows are specified. The narrative sections are marked for rewriting in the author's voice.
+Status: v1 built (2026-09-19). The tool surface and flows below match the code in `src/tools/`. The narrative sections are marked for rewriting in the author's voice. Differences from the original v0 draft: `reconcile` is read-only in v1 (no confirm-gated merge); `settle_plan` does not generate payment links yet; `nudge` posts a comment (Splitwise has no reminder endpoint).
 
 ## Problem
 

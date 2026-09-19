@@ -30,7 +30,7 @@
 - id: ambiguous-name
   model: true
   model_args_include: { group_id: 100, friend: "Alex" }
-  prompt: "What does Alex owe me?"
+  prompt: "What does Alex owe me in Lisbon?"
   tool: explain_balance
   args: { group_id: 100, friend: "Alex" }
   expect:
@@ -101,6 +101,9 @@
 - id: add-missing-cost
   model: true
   model_args_include: { group_id: 100 }
+  # Either outcome is right: the tool returns an error asking for the cost, or the
+  # model asks the person before calling. Both end with a question about cost.
+  model_accept_final_includes: ["cost"]
   prompt: "Add lunch with Sam"
   tool: add_expense
   args: { group_id: 100, text: "lunch with Sam" }

@@ -22,6 +22,8 @@ interface Scenario {
   args: Record<string, unknown>;
   model?: boolean;
   model_args_include?: Record<string, unknown>;
+  /** If no fairsplit tool is called, pass when the final answer includes all of these. */
+  model_accept_final_includes?: string[];
 }
 
 const FAKE_PORT = 3998;
@@ -42,6 +44,7 @@ async function waitFor(url: string): Promise<void> {
 
 interface Run {
   toolCalls: { name: string; input: Record<string, unknown> }[];
+  allTools: string[];
   final: string;
   exit: number;
   stderr: string;
@@ -61,7 +64,7 @@ function runClaude(prompt: string, mcpConfig: string): Promise<Run> {
       'stream-json',
       '--verbose',
       '--max-turns',
-      '6',
+      '10',
       '--model',
       MODEL,
     ];
@@ -74,17 +77,23 @@ function runClaude(prompt: string, mcpConfig: string): Promise<Run> {
     child.stderr.on('data', (d) => (err += String(d)));
     child.on('exit', (code) => {
       const toolCalls: Run['toolCalls'] = [];
+      const allTools: string[] = [];
       let final = '';
       for (const line of out.split('\n').filter(Boolean)) {
         try {
           const j = JSON.parse(line) as { type: string; message?: { content?: { type: string; name?: string; input?: Record<string, unknown> }[] }; result?: string };
-          if (j.type === 'assistant') for (const b of j.message?.content ?? []) if (b.type === 'tool_use' && b.name?.startsWith('mcp__fairsplit__')) toolCalls.push({ name: b.name.replace('mcp__fairsplit__', ''), input: b.input ?? {} });
+          if (j.type === 'assistant')
+            for (const b of j.message?.content ?? []) {
+              if (b.type !== 'tool_use' || !b.name) continue;
+              allTools.push(b.name);
+              if (b.name.startsWith('mcp__fairsplit__')) toolCalls.push({ name: b.name.replace('mcp__fairsplit__', ''), input: b.input ?? {} });
+            }
           if (j.type === 'result') final = j.result ?? '';
         } catch {
           // non-JSON line
         }
       }
-      resolve({ toolCalls, final, exit: code ?? 1, stderr: err });
+      resolve({ toolCalls, allTools, final, exit: code ?? 1, stderr: err });
     });
   });
 }
@@ -132,7 +141,10 @@ async function main() {
     const run = await runClaude(s.prompt, mcpConfig);
     const first = run.toolCalls[0];
     const problems: string[] = [];
-    if (!first) problems.push(`no fairsplit tool was called. final: ${run.final.slice(0, 160)}`);
+    const finalOk = (s.model_accept_final_includes ?? []).length > 0 && s.model_accept_final_includes!.every((w) => run.final.toLowerCase().includes(w.toLowerCase()));
+    if (!first && finalOk) {
+      // The model asked the person instead of calling the tool. Accepted outcome.
+    } else if (!first) problems.push(`no fairsplit tool was called. tools seen: ${run.allTools.join(', ') || 'none'}. exit ${run.exit}. final: ${run.final.slice(0, 160)}`);
     else {
       if (first.name !== s.tool) problems.push(`first tool was ${first.name}, expected ${s.tool}`);
       problems.push(...includes(first.input, s.model_args_include ?? s.args));
@@ -143,7 +155,7 @@ async function main() {
       for (const p of problems) console.log(`      ${p}`);
       if (run.stderr) console.log(`      stderr: ${run.stderr.slice(0, 200)}`);
     } else {
-      console.log(`ok    ${s.id}  ${first!.name} ${JSON.stringify(first!.input)}  (${Date.now() - t0} ms)`);
+      console.log(`ok    ${s.id}  ${first ? `${first.name} ${JSON.stringify(first.input)}` : 'asked the person instead'}  (${Date.now() - t0} ms)`);
     }
   }
   const total = only ? 1 : scenarios.length;

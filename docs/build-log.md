@@ -119,3 +119,13 @@ Fix: pass the incoming path through unchanged. Lesson recorded: every layer need
 ### Model-driven evals
 
 `npm run evals:model` runs each scenario marked `model: true` through `claude -p` with the server attached by `--mcp-config`, parses the stream-json output for `tool_use` blocks, and checks the first fairsplit tool name and a subset of its arguments. Write scenarios are excluded: the confirmation step needs a person, and the CLI in print mode has nobody to ask. Haiku by default (`EVAL_MODEL` overrides). The run costs tokens on the operator's own account, so it is not in CI; it is a local gate before a release.
+
+### Model-driven evals must assert outcomes, not paths
+
+First full model run: 4 of 7 passed. The three failures were the harness being wrong, not the server or the model.
+
+- "What does Alex owe me?" The model called `explain_balance` with `friend: "Alex"` and no `group_id`. The sentence never said Lisbon. The expectation demanded `group_id: 100`. Fixed the prompt to say "in Lisbon"; the point of the scenario is the ambiguity error, not the group lookup.
+- "Add lunch with Sam." The model asked the person for the cost instead of calling `add_expense` and getting the same question back as an error. That is better behavior than the harness expected. Added `model_accept_final_includes: ["cost"]` so either path passes: the tool asks, or the model asks.
+- "Any duplicates in Lisbon?" No fairsplit tool was called and the final answer was empty. The run hit the six-turn limit while the model read resources first. Raised the limit to ten and recorded every tool the model touched in the failure output, so the next miss explains itself.
+
+Rule: a model-driven eval checks the outcome the person would see, and the arguments that matter, not the exact sequence of calls. The deterministic evals own exactness.
