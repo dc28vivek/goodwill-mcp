@@ -1,9 +1,13 @@
 # Deterministic evals. Each scenario drives the server through a real MCP
 # client against the fake Splitwise API and asserts on the tool result.
 # The model is not in the loop here; these are the acceptance tests for the
-# tool surface. Model-driven runs use the same scenarios as prompts.
+# tool surface. Scenarios marked `model: true` also run through the Claude Code
+# CLI (`npm run evals:model`), which checks that a model picks this tool with
+# these arguments from the plain sentence in `prompt`. Write scenarios are not
+# model-driven because the confirmation needs a person.
 
 - id: explain-priya
+  model: true
   prompt: "Why does Priya owe me money in Lisbon?"
   tool: explain_balance
   args: { group_id: 100, friend: "Priya" }
@@ -14,6 +18,8 @@
     text_includes: ["Priya S owes you 61.00 EUR", "Dinner at Cervejaria", "Airbnb"]
 
 - id: explain-group
+  model: true
+  model_args_include: { group_id: 100 }
   prompt: "Explain everyone's balance in Lisbon"
   tool: explain_balance
   args: { group_id: 100 }
@@ -22,6 +28,8 @@
     structured.balances.length: 2
 
 - id: ambiguous-name
+  model: true
+  model_args_include: { group_id: 100, friend: "Alex" }
   prompt: "What does Alex owe me?"
   tool: explain_balance
   args: { group_id: 100, friend: "Alex" }
@@ -30,6 +38,8 @@
     text_includes: ["matches 2 people"]
 
 - id: stale-none-recent
+  model: true
+  model_args_include: {}
   prompt: "Who is late paying me?"
   tool: stale_balances
   args: { older_than_days: 30 }
@@ -49,6 +59,7 @@
     structured.stale.0.counterparty.name: "Priya S"
 
 - id: settle-lisbon
+  model: true
   prompt: "How do we settle Lisbon?"
   tool: settle_plan
   args: { group_id: 100 }
@@ -58,6 +69,8 @@
     structured.plans.0.matches_splitwise: true
 
 - id: reconcile-clean
+  model: true
+  model_args_include: { group_id: 100 }
   prompt: "Any duplicates in Lisbon?"
   tool: reconcile
   args: { group_id: 100 }
@@ -86,6 +99,8 @@
     writes.create_expense: 0
 
 - id: add-missing-cost
+  model: true
+  model_args_include: { group_id: 100 }
   prompt: "Add lunch with Sam"
   tool: add_expense
   args: { group_id: 100, text: "lunch with Sam" }

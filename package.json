@@ -18,7 +18,8 @@
     "typecheck:worker": "tsc -p tsconfig.worker.json",
     "deploy": "wrangler deploy",
     "dev:worker": "wrangler dev",
-    "smoke:worker": "tsx evals/worker-smoke.ts"
+    "smoke:worker": "tsx evals/worker-smoke.ts",
+    "evals:model": "tsx evals/model-run.ts"
   },
   "keywords": [],
   "author": "",

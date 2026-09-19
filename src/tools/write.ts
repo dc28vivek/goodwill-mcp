@@ -4,7 +4,7 @@ import { type ExpenseLike, findDuplicates, fingerprint, toExpenseLike } from '..
 import { fromMinor, splitEqual, toMinor } from '../domain/money.js';
 import { parseExpenseSentence } from '../domain/parser.js';
 import type { Deps, PendingWrite } from '../server/deps.js';
-import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, untrusted } from '../server/format.js';
+import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, timed, untrusted } from '../server/format.js';
 import { describeResolution, resolveMember } from '../server/resolve.js';
 import type { SwCreateExpenseByShares, SwExpense, SwUser } from '../splitwise/types.js';
 import { AddExpenseOutput, ConfirmSchema, NudgeOutput } from './schemas.js';
@@ -58,7 +58,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       outputSchema: AddExpenseOutput,
       annotations: WRITE,
     },
-    async (args, ctx) => {
+    timed(deps.metrics, 'add_expense', async (args, ctx) => {
       const denied = missingScope(ctx, 'add');
       if (denied) return denied;
       const me = await deps.me();
@@ -70,10 +70,13 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         const payload = pending.payload as AddPayload;
         const answer = acceptedContent(ctx.mcpReq.inputResponses, 'confirm', ConfirmSchema);
         if (!answer || answer.confirm !== true || declined(ctx.mcpReq.inputResponses)) {
+          deps.metrics.emit({ type: 'preview_declined', tool: 'add_expense' });
           return ok('Cancelled. Nothing was posted.', { posted: false, group_id: args.group_id, note: 'Cancelled by the user.' });
         }
+        deps.metrics.emit({ type: 'preview_confirmed', tool: 'add_expense' });
         const existing = await deps.writeLog.find(String(me.id), pending.fingerprint, pending.idempotencyKey);
         if (existing) {
+          deps.metrics.emit({ type: 'duplicate_blocked', tool: 'add_expense', source: 'write_log' });
           return ok(`Already posted as expense #${existing.expenseId} ("${existing.description}"). Nothing new was created.`, {
             posted: false,
             expense_id: existing.expenseId,
@@ -82,6 +85,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
           });
         }
         const created = await deps.client.createExpense(payload.body);
+        deps.metrics.emit({ type: 'write_posted', tool: 'add_expense' });
         await deps.writeLog.record(String(me.id), {
           fingerprint: pending.fingerprint,
           ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
@@ -166,6 +170,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
 
       const already = await deps.writeLog.find(String(me.id), fp, args.idempotency_key);
       if (already) {
+        deps.metrics.emit({ type: 'duplicate_blocked', tool: 'add_expense', source: 'write_log' });
         return ok(`Already posted as expense #${already.expenseId} ("${already.description}") within the last 48 hours. Nothing new was created.`, {
           posted: false,
           expense_id: already.expenseId,
@@ -188,6 +193,8 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         preview += ` Possible duplicate: #${d.existing.id} "${untrusted(d.existing.description, 60)}" ${d.existing.cost} ${d.existing.currency_code} on ${d.existing.date.slice(0, 10)} (${Math.round(d.confidence * 100)}%: ${d.reasons.join(', ')}).`;
       }
 
+      if (dupes.length) deps.metrics.emit({ type: 'duplicate_blocked', tool: 'add_expense', source: 'splitwise' });
+      deps.metrics.emit({ type: 'preview_shown', tool: 'add_expense' });
       const payload: AddPayload = { body, description, cost: fromMinor(costMinor), currency, affected, preview };
       const state = await deps.codec.mint({
         kind: 'add_expense',
@@ -202,7 +209,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         },
         requestState: state,
       });
-    },
+    }),
   );
 
   server.registerTool(
@@ -220,7 +227,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       outputSchema: NudgeOutput,
       annotations: WRITE,
     },
-    async (args, ctx) => {
+    timed(deps.metrics, 'nudge', async (args, ctx) => {
       const denied = missingScope(ctx, 'add');
       if (denied) return denied;
       const me = await deps.me();
@@ -231,9 +238,12 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         const payload = pending.payload as NudgePayload;
         const answer = acceptedContent(ctx.mcpReq.inputResponses, 'confirm', ConfirmSchema);
         if (!answer || answer.confirm !== true || declined(ctx.mcpReq.inputResponses)) {
+          deps.metrics.emit({ type: 'preview_declined', tool: 'nudge' });
           return ok('Cancelled. Nothing was posted.', { posted: false, note: 'Cancelled by the user.' });
         }
+        deps.metrics.emit({ type: 'preview_confirmed', tool: 'nudge' });
         const comment = await deps.client.createComment(payload.expenseId, payload.content);
+        deps.metrics.emit({ type: 'write_posted', tool: 'nudge' });
         return ok(`Posted the reminder to ${payload.toName} as a comment on expense #${payload.expenseId}.`, {
           posted: true,
           expense_id: payload.expenseId,
@@ -300,12 +310,13 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       const content = untrusted(args.message ?? drafts[args.tone], 400);
       const preview = `Post this comment on "${untrusted(anchor.description, 60)}" (${anchor.date.slice(0, 10)}), where ${fullName(target)} and everyone else on that expense will see it:\n\n"${content}"`;
 
+      deps.metrics.emit({ type: 'preview_shown', tool: 'nudge' });
       const payload: NudgePayload = { expenseId: anchor.id, content, toName: fullName(target) };
       const state = await deps.codec.mint({ kind: 'nudge', userId: me.id, fingerprint: `nudge|${target.id}|${anchor.id}`, payload });
       return inputRequired({
         inputRequests: { confirm: inputRequired.elicit({ message: `${preview}\n\nPost it?`, requestedSchema: ConfirmSchema }) },
         requestState: state,
       });
-    },
+    }),
   );
 }

@@ -2,6 +2,7 @@ import { createRequestStateCodec } from '@modelcontextprotocol/server';
 import { SplitwiseClient } from '../splitwise/client.js';
 import { MemoryWriteLog, type WriteLog } from '../store/writeLog.js';
 import { type Deps, type PendingWrite, makeDeps } from './deps.js';
+import { type Metrics, stderrMetrics } from './metrics.js';
 
 export interface DepsOptions {
   token: string;
@@ -12,6 +13,7 @@ export interface DepsOptions {
   now?: () => Date;
   /** Test-only override of the Splitwise API base URL. Production always uses the real host. */
   baseUrl?: string;
+  metrics?: Metrics;
 }
 
 export function createDeps(opts: DepsOptions): Deps {
@@ -25,6 +27,7 @@ export function createDeps(opts: DepsOptions): Deps {
     writeLog: opts.writeLog ?? new MemoryWriteLog(),
     codec,
     now: opts.now ?? (() => new Date()),
+    metrics: opts.metrics ?? stderrMetrics(),
   });
 }
 

@@ -2,12 +2,14 @@ import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { beforeEach, describe, expect, it } from 'vitest';
 import { buildServer } from '../src/server/build.js';
 import { createDeps } from '../src/server/env.js';
+import { memoryMetrics } from '../src/server/metrics.js';
 import { fakeFetch, makeState, type FakeState } from './fixtures/fakeSplitwise.js';
 
 const STATE_KEY = 'fairsplit-test-key-0123456789abcdef0123456789';
 
 async function connect(state: FakeState, answer: boolean | 'decline' = true) {
-  const deps = createDeps({ token: 'test-token', stateKey: STATE_KEY, fetch: fakeFetch(state), now: () => new Date('2026-09-19T12:00:00Z') });
+  const metrics = memoryMetrics();
+  const deps = createDeps({ token: 'test-token', stateKey: STATE_KEY, fetch: fakeFetch(state), now: () => new Date('2026-09-19T12:00:00Z'), metrics });
   const server = buildServer(deps);
   const client = new Client({ name: 'test-client', version: '0.0.0' }, { capabilities: { elicitation: { form: {} } } });
   const prompts: string[] = [];
@@ -18,7 +20,7 @@ async function connect(state: FakeState, answer: boolean | 'decline' = true) {
   });
   const [ct, st] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(st), client.connect(ct)]);
-  return { client, server, prompts, deps };
+  return { client, server, prompts, deps, metrics };
 }
 
 describe('fairsplit server', () => {
@@ -142,5 +144,16 @@ describe('fairsplit server', () => {
     const { client } = await connect(state, true);
     const r = await client.callTool({ name: 'nudge', arguments: { friend: 'Alex Brown', group_id: 100 } });
     expect(r.isError).toBe(true);
+  });
+
+  it('emits product metrics for a confirmed write', async () => {
+    const { client, metrics } = await connect(state, true);
+    await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'coffee 10' } });
+    const types = metrics.events.map((e) => e.type);
+    expect(types).toContain('preview_shown');
+    expect(types).toContain('preview_confirmed');
+    expect(types).toContain('write_posted');
+    const calls = metrics.events.filter((e) => e.type === 'tool_call');
+    expect(calls.map((c) => (c as { round: number }).round)).toEqual([1, 2]);
   });
 });

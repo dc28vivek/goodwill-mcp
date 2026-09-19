@@ -103,3 +103,19 @@ The first `wrangler dev --env dev` run returned 500 on `/authorize`: `Cannot rea
 ### Worker smoke test
 
 `npm run smoke:worker` boots `wrangler dev --local`, waits for `/health`, and checks five things: health, protected-resource metadata, authorization-server metadata, a 401 with a Bearer challenge and `resource_metadata` on `/mcp` without a token, and that `/authorize` with an unknown client is refused rather than crashing. Real login against Splitwise is a manual test; it needs the registered app's client id and secret.
+
+### `process` does not exist in a Worker
+
+The metrics module wrote to `process.stderr`. The Worker typecheck failed: `Cannot find name 'process'`. Fix: look up `process` on `globalThis` with a narrow type and fall back to `console.log`, which Workers Observability captures. The two-tsconfig setup caught this before deploy, which is what it is for.
+
+### The model-driven probe found a bug the deterministic harness could not
+
+First run of a real model (Haiku through the Claude Code CLI) against the stdio server and the fake Splitwise API: the model picked `explain_balance` with `group_id: 100, friend: "Priya"` on the first try, then reported that the API returned 404. The deterministic evals, the integration tests, and the conformance run had all passed.
+
+Cause: `evals/fake-splitwise-server.ts` prefixed the incoming path with `/api/v3.0` a second time, so `/api/v3.0/get_current_user` became `/api/v3.0/api/v3.0/get_current_user`, and the fake's router stripped only one prefix. The deterministic evals never used the HTTP fake (they call `fakeFetch` in-process), and the conformance run never called a tool that reaches Splitwise. Only the model run exercised the full chain: CLI, stdio, server, HTTP fake.
+
+Fix: pass the incoming path through unchanged. Lesson recorded: every layer needs one test that crosses it end to end.
+
+### Model-driven evals
+
+`npm run evals:model` runs each scenario marked `model: true` through `claude -p` with the server attached by `--mcp-config`, parses the stream-json output for `tool_use` blocks, and checks the first fairsplit tool name and a subset of its arguments. Write scenarios are excluded: the confirmation step needs a person, and the CLI in print mode has nobody to ask. Haiku by default (`EVAL_MODEL` overrides). The run costs tokens on the operator's own account, so it is not in CI; it is a local gate before a release.

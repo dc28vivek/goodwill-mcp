@@ -2,6 +2,7 @@ import type { RequestStateCodec } from '@modelcontextprotocol/server';
 import type { SplitwiseClient } from '../splitwise/client.js';
 import type { SwCurrentUser, SwGroup } from '../splitwise/types.js';
 import type { WriteLog } from '../store/writeLog.js';
+import type { Metrics } from './metrics.js';
 
 /** The opaque state we mint for multi round-trip confirmations. */
 export interface PendingWrite {
@@ -19,6 +20,7 @@ export interface Deps {
   writeLog: WriteLog;
   codec: RequestStateCodec<PendingWrite>;
   now: () => Date;
+  metrics: Metrics;
   /** Memoized per request. */
   me(): Promise<SwCurrentUser>;
   group(id: number): Promise<SwGroup>;

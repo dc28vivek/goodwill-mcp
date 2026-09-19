@@ -19,7 +19,8 @@ createServer(async (req, res) => {
   for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') headers[k === 'authorization' ? 'Authorization' : k] = v;
   const init: RequestInit = { method: req.method ?? 'GET', headers };
   if (body) init.body = body;
-  const out = await handle(`http://127.0.0.1:${port}/api/v3.0${url.pathname}${url.search}`, init);
+  // The incoming path already carries /api/v3.0 when SPLITWISE_API_BASE points here.
+  const out = await handle(`http://127.0.0.1:${port}${url.pathname}${url.search}`, init);
   res.writeHead(out.status, { 'content-type': 'application/json' });
   res.end(await out.text());
 }).listen(port, '127.0.0.1', () => {

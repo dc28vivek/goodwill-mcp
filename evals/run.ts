@@ -8,6 +8,7 @@ import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { parse } from 'yaml';
 import { buildServer } from '../src/server/build.js';
 import { createDeps } from '../src/server/env.js';
+import { type MetricEvent, memoryMetrics } from '../src/server/metrics.js';
 import { fakeFetch, makeState } from '../tests/fixtures/fakeSplitwise.js';
 
 interface Scenario {
@@ -31,11 +32,14 @@ function getPath(obj: unknown, path: string): unknown {
   }, obj);
 }
 
+const allEvents: MetricEvent[] = [];
+
 async function runScenario(s: Scenario): Promise<string[]> {
   const failures: string[] = [];
   const state = makeState();
+  const metrics = memoryMetrics();
   const now = s.now ? new Date(s.now) : new Date('2026-09-19T12:00:00Z');
-  const deps = createDeps({ token: 'test-token', stateKey: STATE_KEY, fetch: fakeFetch(state), now: () => now });
+  const deps = createDeps({ token: 'test-token', stateKey: STATE_KEY, fetch: fakeFetch(state), now: () => now, metrics });
   const server = buildServer(deps);
   const client = new Client({ name: 'evals', version: '0.0.0' }, { capabilities: { elicitation: { form: {} } } });
   const prompts: string[] = [];
@@ -72,6 +76,7 @@ async function runScenario(s: Scenario): Promise<string[]> {
   }
   await client.close();
   await server.close();
+  allEvents.push(...metrics.events);
   return failures;
 }
 
@@ -93,6 +98,18 @@ async function main() {
   }
   const total = only ? 1 : scenarios.length;
   console.log(`\n${total - failed}/${total} passed in ${Date.now() - started}ms`);
+
+  // Product metrics from this run, the same events the server emits in production.
+  const count = (t: MetricEvent['type']) => allEvents.filter((e) => e.type === t).length;
+  const calls = allEvents.filter((e): e is Extract<MetricEvent, { type: 'tool_call' }> => e.type === 'tool_call');
+  const p50 = [...calls.map((c) => c.ms)].sort((a, b) => a - b)[Math.floor(calls.length / 2)] ?? 0;
+  const shown = count('preview_shown');
+  console.log('\nmetrics');
+  console.log(`  tool calls            ${calls.length} (p50 ${p50} ms, ${calls.filter((c) => !c.ok).length} error results)`);
+  console.log(`  previews shown        ${shown}`);
+  console.log(`  preview accept rate   ${shown ? Math.round((count('preview_confirmed') / shown) * 100) : 0}%`);
+  console.log(`  duplicates blocked    ${count('duplicate_blocked')}`);
+  console.log(`  writes posted         ${count('write_posted')}`);
   process.exit(failed ? 1 : 0);
 }
 

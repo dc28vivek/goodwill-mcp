@@ -18,11 +18,23 @@
 - Writes reverted by users within 24 hours (they edited or deleted in the app).
 - Complaints or comments from other group members about agent-created expenses.
 
-## Instrumentation
+## Instrumentation (as built, 2026-09-19)
 
-- Every tool call opens an OpenTelemetry span with the tool name, user hash, group hash, result type, and duration. Trace context follows the spec's `_meta` keys.
-- Structured logs go to stderr locally and to the platform log sink when hosted. No secrets, no expense descriptions, no names in logs.
-- A small dashboard shows the table above. Grafana Cloud free tier or the platform's analytics.
+`src/server/metrics.ts` emits one JSON event per line. Locally that is stderr; on Cloudflare it is the console, which Workers Observability captures and lets you query. No names, descriptions, or amounts appear in any event.
+
+Events:
+
+| Event | When |
+|---|---|
+| `tool_call {tool, ok, ms, round}` | Every tool handler run. `round` is 1 for the first call and 2 for the confirmed retry. |
+| `preview_shown {tool}` | A write tool returned a preview and asked for confirmation. |
+| `preview_confirmed {tool}` / `preview_declined {tool}` | The person's answer. |
+| `duplicate_blocked {tool, source}` | `write_log`: refused a repeat of our own recent post. `splitwise`: a likely duplicate already in Splitwise was surfaced in the preview. |
+| `write_posted {tool}` | An expense or comment reached Splitwise. |
+
+From these: preview accept rate = confirmed / shown; duplicates blocked per 100 writes; p50 and p95 latency per tool from `ms`; error rate from `ok`. `npm run evals` prints this summary for the eval run, using the same events.
+
+Still to do: OpenTelemetry spans with the spec's `_meta` trace propagation, and a dashboard once the hosted server has real users.
 
 ## Prototype numbers
 

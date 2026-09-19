@@ -50,3 +50,29 @@ export function missingScope(ctx: { http?: { authInfo?: { scopes: string[] } } |
   if (auth.scopes.includes(scope)) return undefined;
   return fail(`This connection was authorized without the "${scope}" scope. Reconnect and grant it to use this tool.`);
 }
+
+
+/**
+ * Wrap a tool handler so every call emits one `tool_call` event with duration
+ * and whether it produced an error result. Round 2 is a retry that carries
+ * input responses.
+ */
+export function timed<A, C extends { mcpReq: { inputResponses?: Record<string, unknown> | undefined } }, R extends { isError?: boolean | undefined } | { resultType?: string }>(
+  metrics: { emit(e: { type: 'tool_call'; tool: string; ok: boolean; ms: number; round: 1 | 2 }): void },
+  tool: string,
+  fn: (args: A, ctx: C) => Promise<R>,
+): (args: A, ctx: C) => Promise<R> {
+  return async (args, ctx) => {
+    const started = Date.now();
+    const round: 1 | 2 = ctx.mcpReq.inputResponses ? 2 : 1;
+    try {
+      const result = await fn(args, ctx);
+      const isError = 'isError' in result && result.isError === true;
+      metrics.emit({ type: 'tool_call', tool, ok: !isError, ms: Date.now() - started, round });
+      return result;
+    } catch (err) {
+      metrics.emit({ type: 'tool_call', tool, ok: false, ms: Date.now() - started, round });
+      throw err;
+    }
+  };
+}

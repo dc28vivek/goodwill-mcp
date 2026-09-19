@@ -6,7 +6,7 @@ import { fromMinor, toMinor } from '../domain/money.js';
 import { settlePlan } from '../domain/settle.js';
 import { staleBalances } from '../domain/stale.js';
 import type { Deps } from '../server/deps.js';
-import { GROUP_URL, fail, fullName, missingScope, ok, untrusted } from '../server/format.js';
+import { GROUP_URL, fail, fullName, missingScope, ok, timed, untrusted } from '../server/format.js';
 import { describeResolution, resolveMember } from '../server/resolve.js';
 import type { SwGroup, SwUser } from '../splitwise/types.js';
 import { ExplainOutput, ReconcileOutput, SettleOutput, StaleOutput } from './schemas.js';
@@ -35,7 +35,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: ExplainOutput,
       annotations: READ,
     },
-    async ({ group_id, friend }, ctx) => {
+    timed(deps.metrics, 'explain_balance', async ({ group_id, friend }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const me = await deps.me();
@@ -87,7 +87,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         return [head, ...items].join('\n');
       });
       return ok(lines.length ? lines.join('\n\n') : 'No shared expenses found.', { me: person(me), balances });
-    },
+    }),
   );
 
   server.registerTool(
@@ -102,7 +102,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: StaleOutput,
       annotations: READ,
     },
-    async ({ older_than_days, group_id }, ctx) => {
+    timed(deps.metrics, 'stale_balances', async ({ older_than_days, group_id }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const me = await deps.me();
@@ -132,7 +132,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         ? stale.map((s) => `${s.counterparty.name}: ${s.direction === 'they_owe_you' ? 'owes you' : 'you owe'} ${s.amount} ${s.currency}, ${s.age_days} days since last activity (${s.last_activity})`).join('\n')
         : `No balances older than ${older_than_days} days.`;
       return ok(text, { older_than_days, stale });
-    },
+    }),
   );
 
   server.registerTool(
@@ -144,7 +144,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: SettleOutput,
       annotations: READ,
     },
-    async ({ group_id }, ctx) => {
+    timed(deps.metrics, 'settle_plan', async ({ group_id }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const group = await deps.group(group_id);
@@ -188,7 +188,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         plans,
         note,
       });
-    },
+    }),
   );
 
   server.registerTool(
@@ -204,7 +204,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: ReconcileOutput,
       annotations: READ,
     },
-    async ({ group_id, since_days, threshold }, ctx) => {
+    timed(deps.metrics, 'reconcile', async ({ group_id, since_days, threshold }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const since = new Date(deps.now().getTime() - since_days * 86_400_000).toISOString();
@@ -225,6 +225,6 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         ? clusters.map((c) => `${Math.round(c.confidence * 100)}%  #${c.suspect.expense_id} "${c.suspect.description}" (${c.suspect.date}) looks like #${c.keep.expense_id} "${c.keep.description}" (${c.keep.date}), ${c.keep.amount} ${c.keep.currency}. ${c.reasons.join(', ')}.`).join('\n')
         : `Scanned ${expenses.length} expenses since ${since.slice(0, 10)}. No likely duplicates.`;
       return ok(text, { group_id, scanned: expenses.length, clusters });
-    },
+    }),
   );
 }
