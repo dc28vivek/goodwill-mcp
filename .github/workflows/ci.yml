@@ -26,6 +26,8 @@ jobs:
         run: npm run evals
       - name: MCP conformance suite against baseline
         run: npm run conformance
+      - name: Package smoke test (install the tarball and run it)
+        run: npm run smoke:package
       - name: Worker smoke test (local wrangler)
         run: npm run smoke:worker
         env:

@@ -141,3 +141,23 @@ Second finding from the same run: "Add lunch with Sam" ends with the model askin
 ### Full model run after the fixes
 
 All 7 model-driven scenarios pass with Haiku (see `npm run evals:model`). Reads pick the right tool with the right arguments in one call. The missing-cost scenario ends with the model asking the person, which is the better outcome.
+
+### Packaging for npm: what the published artifact actually needs
+
+Goal: anyone can run `npx -y goodwill-mcp` with their own Splitwise API key. That means the published package must be compiled JavaScript with a real bin, and must not drag in dependencies only the repo needs.
+
+Three things had to be separated that had been sitting together:
+
+1. **Build scope.** The base `tsconfig.json` includes `tests/` and `evals/`, so a plain `tsc` would emit them into `dist/`. A second config, `tsconfig.build.json`, compiles only `src/`, excluding `src/worker.ts` (Cloudflare globals) and `src/bin/http.ts` (dev-only). That is now three tsconfigs: Node entry points, Worker, and build. Each exists because the three targets genuinely have different globals and different file sets.
+
+2. **Dependencies.** `@modelcontextprotocol/client` is only used by tests and evals, `@modelcontextprotocol/node` only by the local HTTP server, and `@cloudflare/workers-oauth-provider` only by the Worker. All three moved to devDependencies. `@modelcontextprotocol/core` was a direct dependency that nothing imports; it is a transitive dep of the server package. Dropped. The published package now installs two runtime dependencies (`@modelcontextprotocol/server`, `zod`) and weighs 24 KB.
+
+3. **The bin.** `src/bin/stdio.ts` already carried `#!/usr/bin/env node`; tsc preserves it as a leading comment, and npm sets the executable bit on `bin` targets at install time. No shebang plugin needed.
+
+### A smoke test for the thing people download
+
+Unit tests, integration tests, evals and conformance all run against the source tree. None of them would catch a broken `files` list, a missing dependency, a wrong `bin` path, or a build that emits the wrong shape. That is exactly the class of bug that only appears after publishing.
+
+`npm run smoke:package` packs the tarball, installs it into a throwaway directory the way a stranger would, starts the fake Splitwise API, and drives the **installed binary** over stdio with a real MCP client: server identity, tool count, a real read with a real number, a resource read, and a declined write. Five checks, and it runs in CI.
+
+This is the same lesson as the earlier path-prefix bug, applied one layer out: every artifact you ship needs one test that exercises it as shipped, not as sourced.

@@ -2,45 +2,70 @@
   "name": "goodwill-mcp",
   "version": "0.1.0",
   "description": "Goodwill: an unofficial Splitwise MCP server. Explain balances, settle up, add expenses in a sentence. Every write is confirmed and nothing is ever deleted.",
-  "main": "index.js",
-  "directories": {
-    "doc": "docs"
-  },
   "scripts": {
-    "test": "vitest run",
-    "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test:watch": "vitest",
-    "dev:stdio": "tsx src/bin/stdio.ts",
-    "evals": "tsx evals/run.ts",
-    "dev:http": "tsx src/bin/http.ts",
+    "build": "tsc -p tsconfig.build.json",
     "conformance": "tsx evals/conformance.ts --expected-failures conformance-baseline.yml",
-    "typecheck:worker": "tsc -p tsconfig.worker.json",
     "deploy": "wrangler deploy",
+    "dev:http": "tsx src/bin/http.ts",
+    "dev:stdio": "tsx src/bin/stdio.ts",
     "dev:worker": "wrangler dev",
+    "evals": "tsx evals/run.ts",
+    "evals:model": "tsx evals/model-run.ts",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
     "smoke:worker": "tsx evals/worker-smoke.ts",
-    "evals:model": "tsx evals/model-run.ts"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck:worker": "tsc -p tsconfig.worker.json",
+    "smoke:package": "tsx evals/package-smoke.ts"
   },
-  "keywords": [],
-  "author": "",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "splitwise",
+    "expenses",
+    "shared-expenses",
+    "claude",
+    "ai-agent",
+    "bill-splitting",
+    "unofficial"
+  ],
+  "author": "Vivek",
   "license": "MIT",
   "type": "module",
-  "private": "true",
   "dependencies": {
-    "@cloudflare/workers-oauth-provider": "^0.10.3",
-    "@modelcontextprotocol/client": "^2.0.0",
-    "@modelcontextprotocol/core": "^2.0.0",
-    "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "^2.0.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@cloudflare/workers-oauth-provider": "^0.10.3",
     "@cloudflare/workers-types": "^5.20260919.1",
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@modelcontextprotocol/node": "^2.0.0",
     "@types/node": "^26.6.2",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7",
     "wrangler": "^4.135.0",
     "yaml": "^2.9.1"
+  },
+  "bin": {
+    "goodwill-mcp": "./dist/bin/stdio.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=20.6"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/dc28vivek/goodwill-mcp.git"
+  },
+  "homepage": "https://github.com/dc28vivek/goodwill-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/dc28vivek/goodwill-mcp/issues"
   }
 }

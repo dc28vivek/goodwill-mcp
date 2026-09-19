@@ -29,31 +29,39 @@ Every write goes through the 2026-07-28 multi round-trip pattern: the tool retur
 
 Resources: `splitwise://groups`, `splitwise://categories`, `splitwise://currencies`. Prompt: `close_out_trip`.
 
-## Run it locally (stdio)
+## Try it (60 seconds)
 
-1. Register an app at https://secure.splitwise.com/apps and copy the API key.
-2. `npm install`
-3. Add to Claude Code:
+You need a Splitwise API key. Register an app at [secure.splitwise.com/apps](https://secure.splitwise.com/apps), give it any name, and copy the key.
+
+**Claude Code**
 
 ```bash
-claude mcp add goodwill -e SPLITWISE_API_KEY=your-key -- npx tsx /path/to/goodwill-mcp/src/bin/stdio.ts
+claude mcp add goodwill -e SPLITWISE_API_KEY=your-key -- npx -y goodwill-mcp
 ```
 
-Or in Claude Desktop's config:
+**Claude Desktop, Cursor, or any MCP client**
 
 ```json
 {
   "mcpServers": {
     "goodwill": {
       "command": "npx",
-      "args": ["tsx", "/path/to/goodwill-mcp/src/bin/stdio.ts"],
+      "args": ["-y", "goodwill-mcp"],
       "env": { "SPLITWISE_API_KEY": "your-key" }
     }
   }
 }
 ```
 
-Then: "Read my Splitwise groups and explain what Priya owes me in Lisbon."
+Then ask it something:
+
+- *"What are my Splitwise groups?"*
+- *"Why do I owe Priya money?"*
+- *"Who's more than 30 days late paying me back?"*
+- *"How do we settle the Lisbon trip?"*
+- *"Add dinner 84, I paid, split with everyone"* — it shows you the split and who it affects, then waits for your yes.
+
+Your key stays on your machine. Nothing is sent anywhere except Splitwise's own API.
 
 ## Run it locally (HTTP)
 
@@ -82,6 +90,8 @@ npm run evals            # 14 deterministic scenarios in evals/scenarios.yaml
 npm run evals:model      # 7 of them through the Claude Code CLI with Haiku (costs tokens)
 npm run conformance      # official MCP conformance suite vs conformance-baseline.yml
 npm run smoke:worker     # boots wrangler dev and checks the OAuth plumbing
+npm run smoke:package    # packs, installs the tarball elsewhere, drives the installed binary
+npm run build            # compile the publishable stdio server to dist/
 ```
 
 ## Read in this order
