@@ -82,9 +82,13 @@ SPLITWISE_API_KEY=your-key npm run dev:http     # http://127.0.0.1:3000/mcp
 
 A Splitwise access token never expires and has no scopes, so a hosted deployment holds permanent full account access for every user. Goodwill stores each token encrypted, decrypts it only while serving that person's own request, and adds `read`, `add` and `modify` scopes of its own because Splitwise has none. It is allowlisted by design. See [SECURITY.md](SECURITY.md).
 
-## Why it's built this way
+## Design notes
 
-The design decisions and their reasoning live in [docs/decisions/](docs/decisions/) — six job-shaped tools instead of an API mirror, preview-then-confirm on every write, treating group text as untrusted, no delete, money as integer minor units, and why tool names have to state the job in the words a person would use.
+Six tools shaped like jobs rather than a mirror of the Splitwise API, because a model picks
+tools by name and description and cannot usefully compose thirty endpoints. Money is handled
+as integer minor units and only ever crosses the wire as a decimal string, because Splitwise
+requires shares to sum exactly to the cost. Sentences are parsed deterministically first and
+only handed to a model for the ambiguous tail, so the behaviour is testable.
 
 ## Develop
 
