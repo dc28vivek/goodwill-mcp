@@ -1,0 +1,82 @@
+import type { SwExpense } from '../splitwise/types.js';
+import { type Minor, toMinor } from './money.js';
+
+export interface Contribution {
+  expenseId: number;
+  description: string;
+  date: string;
+  currency: string;
+  /** Positive: the counterparty owes `me` from this expense. Negative: I owe them. */
+  amount: Minor;
+  kind: 'expense' | 'payment';
+}
+
+export interface BalanceExplanation {
+  meId: number;
+  counterpartyId: number;
+  currency: string;
+  /** Positive: they owe me. Negative: I owe them. */
+  net: Minor;
+  contributions: Contribution[];
+}
+
+/**
+ * Explain the balance between two people from the raw expenses they share.
+ *
+ * Per expense, each person's net is paid_share minus owed_share. Between two
+ * people the amount that flows is bounded by what each of them is on the
+ * hook for. For a normal split where one person paid and both owe, the
+ * counterparty's owed share is what they owe the payer. For payments, the
+ * whole cost flows from payer to receiver.
+ *
+ * This mirrors how Splitwise shows "you are owed X for Dinner" on an expense
+ * card, so the explanation matches what the user sees in the app.
+ */
+export function explainBalance(meId: number, counterpartyId: number, expenses: SwExpense[]): BalanceExplanation[] {
+  const byCurrency = new Map<string, Contribution[]>();
+
+  for (const e of expenses) {
+    if (e.deleted_at) continue;
+    const me = e.users.find((u) => u.user_id === meId);
+    const them = e.users.find((u) => u.user_id === counterpartyId);
+    if (!me || !them) continue;
+
+    const myNet = toMinor(me.paid_share) - toMinor(me.owed_share);
+    const theirNet = toMinor(them.paid_share) - toMinor(them.owed_share);
+    if (myNet === 0 && theirNet === 0) continue;
+
+    let amount: Minor;
+    if (e.payment) {
+      // A payment lowers the payer's debt. If they paid me, what they owe me
+      // goes down (negative). If I paid them, what they owe me goes up.
+      amount = toMinor(me.paid_share) - toMinor(them.paid_share);
+    } else if (myNet > 0 && theirNet < 0) {
+      amount = Math.min(myNet, -theirNet);
+    } else if (myNet < 0 && theirNet > 0) {
+      amount = -Math.min(-myNet, theirNet);
+    } else {
+      // Both paid or both owe: split the difference proportionally is not
+      // something Splitwise does per pair; nothing flows between these two.
+      continue;
+    }
+
+    const list = byCurrency.get(e.currency_code) ?? [];
+    list.push({
+      expenseId: e.id,
+      description: e.description,
+      date: e.date,
+      currency: e.currency_code,
+      amount,
+      kind: e.payment ? 'payment' : 'expense',
+    });
+    byCurrency.set(e.currency_code, list);
+  }
+
+  return [...byCurrency.entries()].map(([currency, contributions]) => ({
+    meId,
+    counterpartyId,
+    currency,
+    net: contributions.reduce((acc, c) => acc + c.amount, 0),
+    contributions: contributions.sort((a, b) => b.date.localeCompare(a.date)),
+  }));
+}
