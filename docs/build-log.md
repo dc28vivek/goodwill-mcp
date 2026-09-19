@@ -129,3 +129,15 @@ First full model run: 4 of 7 passed. The three failures were the harness being w
 - "Any duplicates in Lisbon?" No fairsplit tool was called and the final answer was empty. The run hit the six-turn limit while the model read resources first. Raised the limit to ten and recorded every tool the model touched in the failure output, so the next miss explains itself.
 
 Rule: a model-driven eval checks the outcome the person would see, and the arguments that matter, not the exact sequence of calls. The deterministic evals own exactness.
+
+### Tool names carry the job, because clients load tools by search
+
+"Any duplicates in Lisbon?" failed twice with Haiku. The model read the groups resource, searched for tools, read resources again, and ran out of turns without ever calling `reconcile`. Every other scenario passed. The difference: Claude Code loads MCP tools lazily through a search step, and the model searched for "duplicates". The tool was named `reconcile`. Its description said "Find duplicate expenses", but the name is what the search step keys on first.
+
+Renamed the tool to `find_duplicates`. Same description, same schema, same code. The scenario passed on the next run in 11 seconds with one call. Recorded as ADR-0009: a tool's name states the job in the words a person would use, because at least one major client discovers tools by name before it reads descriptions.
+
+Second finding from the same run: "Add lunch with Sam" ends with the model asking for "the amount you spent", not "the cost". The harness matched on "cost". Outcome checks match any of a few synonyms now. Words the model chooses are not the words in our schema, and the eval has to allow for that.
+
+### Full model run after the fixes
+
+All 7 model-driven scenarios pass with Haiku (see `npm run evals:model`). Reads pick the right tool with the right arguments in one call. The missing-cost scenario ends with the model asking the person, which is the better outcome.

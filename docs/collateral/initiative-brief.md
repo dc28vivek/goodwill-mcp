@@ -24,7 +24,7 @@ The organizer: the one person per group who creates it, enters most expenses, fr
 
 ## What we would ship
 
-Six tools, not thirty. `explain_balance`, `stale_balances`, `settle_plan`, `reconcile`, `add_expense`, `nudge`. Three read-only resources for groups, categories, and currencies. One prompt, "close out a trip."
+Six tools, not thirty. `explain_balance`, `stale_balances`, `settle_plan`, `find_duplicates`, `add_expense`, `nudge`. Three read-only resources for groups, categories, and currencies. One prompt, "close out a trip."
 
 The rules that make it safe in a multi-player product:
 

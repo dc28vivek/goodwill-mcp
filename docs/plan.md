@@ -4,7 +4,7 @@ Last updated: 2026-09-19
 
 ## Status
 
-Weeks 1 to 3 of the schedule below are built as of 2026-09-19: domain logic with tests, the six tools, stdio and local HTTP entry points, the Cloudflare Worker with OAuth and scope tiers, deterministic evals, the conformance harness with a baseline, a Worker smoke test, and CI. Not done: a deploy against a real Splitwise app (needs the client id and secret), user interviews, the metrics dashboard with real numbers, and the week-4 items (App, demo video, retrospective). The build log records every problem hit so far.
+Weeks 1 to 3 of the schedule below are built as of 2026-09-19: domain logic with tests, the six tools, stdio and local HTTP entry points, the Cloudflare Worker with OAuth and scope tiers, deterministic evals, model-driven evals through the Claude Code CLI, the conformance harness with a baseline, a Worker smoke test, product metrics events, and CI. Not done: a deploy against a real Splitwise app (needs the client id and secret), user interviews, the metrics dashboard with real numbers, and the week-4 items (App, demo video, retrospective). The build log records every problem hit so far.
 
 ## Goal
 
@@ -35,7 +35,7 @@ Six tools, three resources, one prompt. Read-only by default. Every write previe
 | `explain_balance` | Show the net balance with a group or friend and the expenses behind it | read |
 | `stale_balances` | List balances that are older than N days, with age and amount | read |
 | `add_expense` | Turn a sentence or a receipt into a proposed split, confirm, then write | write |
-| `reconcile` | Find likely duplicate expenses in a group and propose merges | read, then write on confirm |
+| `find_duplicates` | Find likely duplicate expenses in a group and propose merges | read, then write on confirm |
 | `settle_plan` | Produce the minimum set of payments to close a group, with a pay link per person | read |
 | `nudge` | Draft a reminder in a chosen tone and post it as a comment on confirm | write |
 

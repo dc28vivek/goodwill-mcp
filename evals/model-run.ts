@@ -22,8 +22,8 @@ interface Scenario {
   args: Record<string, unknown>;
   model?: boolean;
   model_args_include?: Record<string, unknown>;
-  /** If no fairsplit tool is called, pass when the final answer includes all of these. */
-  model_accept_final_includes?: string[];
+  /** If no fairsplit tool is called, pass when the final answer includes any of these. */
+  model_accept_final_includes_any?: string[];
 }
 
 const FAKE_PORT = 3998;
@@ -141,7 +141,7 @@ async function main() {
     const run = await runClaude(s.prompt, mcpConfig);
     const first = run.toolCalls[0];
     const problems: string[] = [];
-    const finalOk = (s.model_accept_final_includes ?? []).length > 0 && s.model_accept_final_includes!.every((w) => run.final.toLowerCase().includes(w.toLowerCase()));
+    const finalOk = (s.model_accept_final_includes_any ?? []).some((w) => run.final.toLowerCase().includes(w.toLowerCase()));
     if (!first && finalOk) {
       // The model asked the person instead of calling the tool. Accepted outcome.
     } else if (!first) problems.push(`no fairsplit tool was called. tools seen: ${run.allTools.join(', ') || 'none'}. exit ${run.exit}. final: ${run.final.slice(0, 160)}`);

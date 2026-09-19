@@ -2,7 +2,7 @@
 
 An unofficial MCP connector for Splitwise, built as a product and engineering showcase.
 
-**Status:** v1 built. Six tools, three resources, one prompt. Runs over stdio for local use and as a Cloudflare Worker with OAuth for hosted use. 55 tests, 14 deterministic evals, the official MCP conformance suite against a documented baseline, and a local Worker smoke test all pass. Not yet deployed against a real Splitwise app; that needs the registered client id and secret.
+**Status:** v1 built. Six tools, three resources, one prompt. Runs over stdio for local use and as a Cloudflare Worker with OAuth for hosted use. 56 tests, 14 deterministic evals, 7 model-driven evals, the official MCP conformance suite against a documented baseline, and a local Worker smoke test all pass. Not yet deployed against a real Splitwise app; that needs the registered client id and secret.
 
 ## What this is
 
@@ -17,7 +17,7 @@ Thirty people have already built unofficial Splitwise MCP servers. None of them 
 | `explain_balance` | The number and the expenses behind it | no |
 | `stale_balances` | Who is late, by how long | no |
 | `settle_plan` | Minimum payments to close a group, checked against Splitwise | no |
-| `reconcile` | Likely duplicate expenses with a confidence and a suggested action | no |
+| `find_duplicates` | Likely duplicate expenses with a confidence and a suggested action | no |
 | `add_expense` | A sentence or fields, a preview naming who is affected, then a confirmed post | after confirmation |
 | `nudge` | A drafted reminder in a chosen tone, posted as a comment after confirmation | after confirmation |
 
@@ -75,6 +75,7 @@ npm test                 # unit + in-process integration tests (vitest)
 npm run typecheck        # Node entry points
 npm run typecheck:worker # Cloudflare Worker
 npm run evals            # 14 deterministic scenarios in evals/scenarios.yaml
+npm run evals:model      # 7 of them through the Claude Code CLI with Haiku (costs tokens)
 npm run conformance      # official MCP conformance suite vs conformance-baseline.yml
 npm run smoke:worker     # boots wrangler dev and checks the OAuth plumbing
 ```

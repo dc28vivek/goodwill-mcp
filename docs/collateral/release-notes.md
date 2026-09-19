@@ -9,7 +9,7 @@ First working release of fairsplit-mcp, an unofficial Splitwise connector for AI
 - **Ask why you owe what you owe.** `explain_balance` shows the net number with a person or a group and the expenses behind it, including payments.
 - **Find who is late.** `stale_balances` lists balances open longer than a number of days, oldest first.
 - **Close out a group.** `settle_plan` gives the minimum set of payments and says whether it matches what Splitwise shows.
-- **Catch double posts.** `reconcile` flags expenses that look like duplicates, with a confidence and a suggested action. It never deletes.
+- **Catch double posts.** `find_duplicates` flags expenses that look like duplicates, with a confidence and a suggested action. It never deletes.
 - **Add an expense in one sentence.** `add_expense` understands "dinner 84, I paid, split with everyone," shows a preview naming everyone whose balance changes, and posts only after you confirm.
 - **Send a reminder without the awkwardness.** `nudge` drafts a comment in a gentle, plain, or firm tone and posts it after you confirm.
 

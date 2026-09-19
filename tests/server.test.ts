@@ -32,7 +32,7 @@ describe('fairsplit server', () => {
   it('lists six tools with honest annotations and fixed order', async () => {
     const { client } = await connect(state);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'stale_balances', 'settle_plan', 'reconcile', 'add_expense', 'nudge']);
+    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'nudge']);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.explain_balance?.annotations?.readOnlyHint).toBe(true);
     expect(byName.add_expense?.annotations?.readOnlyHint).toBe(false);
@@ -78,10 +78,10 @@ describe('fairsplit server', () => {
 
   it('finds no duplicates in a clean group and one after a double post', async () => {
     const { client } = await connect(state);
-    const clean = await client.callTool({ name: 'reconcile', arguments: { group_id: 100 } });
+    const clean = await client.callTool({ name: 'find_duplicates', arguments: { group_id: 100 } });
     expect((clean.structuredContent as { clusters: unknown[] }).clusters).toHaveLength(0);
     state.expenses.push({ ...state.expenses[0]!, id: 7777, date: '2026-09-05T21:00:00Z' });
-    const dirty = await client.callTool({ name: 'reconcile', arguments: { group_id: 100 } });
+    const dirty = await client.callTool({ name: 'find_duplicates', arguments: { group_id: 100 } });
     const sc = dirty.structuredContent as { clusters: { suspect: { expense_id: number }; keep: { expense_id: number } }[] };
     expect(sc.clusters).toHaveLength(1);
     expect(sc.clusters[0]?.suspect.expense_id).toBe(7777);

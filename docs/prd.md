@@ -1,6 +1,6 @@
 # PRD: fairsplit-mcp v1
 
-Status: v1 built (2026-09-19). The tool surface and flows below match the code in `src/tools/`. The narrative sections are marked for rewriting in the author's voice. Differences from the original v0 draft: `reconcile` is read-only in v1 (no confirm-gated merge); `settle_plan` does not generate payment links yet; `nudge` posts a comment (Splitwise has no reminder endpoint).
+Status: v1 built (2026-09-19). The tool surface and flows below match the code in `src/tools/`. The narrative sections are marked for rewriting in the author's voice. Differences from the original v0 draft: `find_duplicates` is read-only in v1 (no confirm-gated merge); `settle_plan` does not generate payment links yet; `nudge` posts a comment (Splitwise has no reminder endpoint).
 
 ## Problem
 
@@ -62,7 +62,7 @@ Names follow the MCP naming rules. Every tool has an `inputSchema`, an `outputSc
 - Duplicate check runs before step 1. A likely duplicate is shown in the preview.
 - Annotations: not read-only, not idempotent (the write log makes retries safe).
 
-### `reconcile`
+### `find_duplicates`
 
 - Input: `group_id`, optional `since`.
 - Output: groups of likely duplicates with a confidence and a suggested action.
@@ -91,7 +91,7 @@ Names follow the MCP naming rules. Every tool has an `inputSchema`, an `outputSc
 
 ### Prompt
 
-- `close_out_trip`: runs `reconcile`, then `explain_balance` for each member, then `settle_plan`, and ends with a summary the organizer can paste into the group chat.
+- `close_out_trip`: runs `find_duplicates`, then `explain_balance` for each member, then `settle_plan`, and ends with a summary the organizer can paste into the group chat.
 
 ## Flows
 

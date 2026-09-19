@@ -12,3 +12,4 @@ One file per decision. Each records the context, the choice, the alternatives, a
 | 0006 | TypeScript, v2 MCP packages, Cloudflare Workers | accepted |
 | 0007 | Deterministic parser first, model second | accepted |
 | 0008 | Multi-user OAuth in v1, behind an allowlist | accepted |
+| 0009 | Tool names state the job in the user's words | accepted |

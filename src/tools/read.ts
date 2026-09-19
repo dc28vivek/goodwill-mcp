@@ -192,7 +192,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
   );
 
   server.registerTool(
-    'reconcile',
+    'find_duplicates',
     {
       title: 'Find duplicate expenses',
       description: 'Scan a group for expenses that look like duplicates: same amount and currency, within a day or three, same payer, similar words. Returns clusters with a confidence and a suggested action. Read-only: nothing is changed or deleted.',
@@ -204,7 +204,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: ReconcileOutput,
       annotations: READ,
     },
-    timed(deps.metrics, 'reconcile', async ({ group_id, since_days, threshold }, ctx) => {
+    timed(deps.metrics, 'find_duplicates', async ({ group_id, since_days, threshold }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const since = new Date(deps.now().getTime() - since_days * 86_400_000).toISOString();
