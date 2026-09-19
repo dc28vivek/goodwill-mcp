@@ -23,7 +23,7 @@ preloadSchemas();
 
 export interface Env {
   OAUTH_KV: KVNamespace;
-  FAIRSPLIT_KV: KVNamespace;
+  GOODWILL_KV: KVNamespace;
   OAUTH_PROVIDER: OAuthHelpers;
   /** Comma-separated emails allowed to connect. Empty means nobody. */
   ALLOWED_EMAILS: string;
@@ -32,7 +32,7 @@ export interface Env {
   SPLITWISE_CLIENT_ID: string;
   SPLITWISE_CLIENT_SECRET: string;
   /** HMAC key for multi round-trip request state. At least 32 characters. */
-  FAIRSPLIT_STATE_KEY: string;
+  GOODWILL_STATE_KEY: string;
 }
 
 /** Stored encrypted by the provider, keyed by the access token. */
@@ -53,7 +53,7 @@ const PENDING_TTL_SECONDS = 600;
 
 function html(body: string, status = 200): Response {
   return new Response(
-    `<!doctype html><meta charset="utf-8"><title>Fairsplit</title><body style="font:16px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem">${body}</body>`,
+    `<!doctype html><meta charset="utf-8"><title>Goodwill</title><body style="font:16px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem">${body}</body>`,
     { status, headers: { 'content-type': 'text/html; charset=utf-8' } },
   );
 }
@@ -102,9 +102,9 @@ const defaultHandler: ExportedHandler<Env> = {
     const url = new URL(request.url);
 
     if (url.pathname === '/' || url.pathname === '/health') {
-      if (url.pathname === '/health') return Response.json({ ok: true, name: 'fairsplit-mcp' });
+      if (url.pathname === '/health') return Response.json({ ok: true, name: 'goodwill-mcp' });
       return html(
-        `<h1>Fairsplit</h1><p>An unofficial Splitwise connector for AI agents. Add <code>${url.origin}/mcp</code> as a custom connector in Claude. Access is limited to an allowlist.</p><p>Not affiliated with Splitwise, Inc.</p>`,
+        `<h1>Goodwill</h1><p><strong>An unofficial Splitwise MCP server.</strong> Add <code>${url.origin}/mcp</code> as a custom connector in Claude, then sign in with Splitwise. Access is limited to an allowlist.</p><p>In accounting, goodwill is the value of a relationship that never appears on the balance sheet. That is what this protects.</p><p>Not affiliated with, endorsed by, or supported by Splitwise, Inc.</p>`,
       );
     }
 
@@ -126,7 +126,7 @@ const defaultHandler: ExportedHandler<Env> = {
       if (!client) return html('<p>Unknown OAuth client.</p>', 400);
 
       const nonce = crypto.randomUUID();
-      await env.FAIRSPLIT_KV.put(`pending|${nonce}`, JSON.stringify({ authRequest, clientName: client.clientName ?? authRequest.clientId }), { expirationTtl: PENDING_TTL_SECONDS });
+      await env.GOODWILL_KV.put(`pending|${nonce}`, JSON.stringify({ authRequest, clientName: client.clientName ?? authRequest.clientId }), { expirationTtl: PENDING_TTL_SECONDS });
 
       const to = new URL(SPLITWISE_AUTHORIZE);
       to.searchParams.set('response_type', 'code');
@@ -140,9 +140,9 @@ const defaultHandler: ExportedHandler<Env> = {
       const code = url.searchParams.get('code');
       const nonce = url.searchParams.get('state');
       if (!code || !nonce) return html('<p>Missing code or state.</p>', 400);
-      const raw = await env.FAIRSPLIT_KV.get(`pending|${nonce}`);
+      const raw = await env.GOODWILL_KV.get(`pending|${nonce}`);
       if (!raw) return html('<p>This login link expired. Start again from your MCP client.</p>', 400);
-      await env.FAIRSPLIT_KV.delete(`pending|${nonce}`);
+      await env.GOODWILL_KV.delete(`pending|${nonce}`);
       const { authRequest, clientName } = JSON.parse(raw) as { authRequest: AuthRequest; clientName: string };
 
       const splitwiseToken = await exchangeCode(env, code, `${url.origin}/callback`);
@@ -177,8 +177,8 @@ export class McpApi extends WorkerEntrypoint<Env, Props> {
     const props = this.ctx.props;
     const deps = createDeps({
       token: props.splitwiseToken,
-      stateKey: this.env.FAIRSPLIT_STATE_KEY,
-      writeLog: new KvWriteLog(this.env.FAIRSPLIT_KV),
+      stateKey: this.env.GOODWILL_STATE_KEY,
+      writeLog: new KvWriteLog(this.env.GOODWILL_KV),
     });
     const handler = createMcpHandler(() => buildServer(deps));
     try {

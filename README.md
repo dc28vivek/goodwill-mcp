@@ -1,6 +1,10 @@
-# fairsplit-mcp
+# Goodwill
 
-An unofficial MCP connector for Splitwise, built as a product and engineering showcase.
+**An unofficial Splitwise MCP server.** Ask why you owe what you owe, settle up a trip, add an expense in a sentence, and remind someone without the awkwardness. Every write shows who it affects and waits for your yes. Nothing is ever deleted.
+
+> In accounting, goodwill is the value of a relationship that never appears on the balance sheet. That is what a shared-expense app is actually protecting. The ledger is in service of the goodwill, not the other way round.
+
+Built as a product and engineering showcase. Not affiliated with Splitwise, Inc.
 
 **Status:** v1 built. Six tools, three resources, one prompt. Runs over stdio for local use and as a Cloudflare Worker with OAuth for hosted use. 56 tests, 14 deterministic evals, 7 model-driven evals, the official MCP conformance suite against a documented baseline, and a local Worker smoke test all pass. Not yet deployed against a real Splitwise app; that needs the registered client id and secret.
 
@@ -32,7 +36,7 @@ Resources: `splitwise://groups`, `splitwise://categories`, `splitwise://currenci
 3. Add to Claude Code:
 
 ```bash
-claude mcp add fairsplit -e SPLITWISE_API_KEY=your-key -- npx tsx /path/to/fairsplit-mcp/src/bin/stdio.ts
+claude mcp add goodwill -e SPLITWISE_API_KEY=your-key -- npx tsx /path/to/goodwill-mcp/src/bin/stdio.ts
 ```
 
 Or in Claude Desktop's config:
@@ -40,9 +44,9 @@ Or in Claude Desktop's config:
 ```json
 {
   "mcpServers": {
-    "fairsplit": {
+    "goodwill": {
       "command": "npx",
-      "args": ["tsx", "/path/to/fairsplit-mcp/src/bin/stdio.ts"],
+      "args": ["tsx", "/path/to/goodwill-mcp/src/bin/stdio.ts"],
       "env": { "SPLITWISE_API_KEY": "your-key" }
     }
   }
@@ -60,8 +64,8 @@ SPLITWISE_API_KEY=your-key npm run dev:http     # http://127.0.0.1:3000/mcp
 ## Host it (Cloudflare Worker, multi-user)
 
 1. In your Splitwise app settings, set the callback URL to `https://<your-worker-host>/callback` and note the client id and secret.
-2. `npx wrangler kv namespace create OAUTH_KV` and `npx wrangler kv namespace create FAIRSPLIT_KV`; paste the ids into `wrangler.jsonc`.
-3. Secrets: `npx wrangler secret put SPLITWISE_CLIENT_ID`, `SPLITWISE_CLIENT_SECRET`, `FAIRSPLIT_STATE_KEY` (32+ random characters).
+2. `npx wrangler kv namespace create OAUTH_KV` and `npx wrangler kv namespace create GOODWILL_KV`; paste the ids into `wrangler.jsonc`.
+3. Secrets: `npx wrangler secret put SPLITWISE_CLIENT_ID`, `SPLITWISE_CLIENT_SECRET`, `GOODWILL_STATE_KEY` (32+ random characters).
 4. Set `ALLOWED_EMAILS` in `wrangler.jsonc` to the Splitwise account emails that may connect. Empty means nobody.
 5. `npm run deploy`
 6. In Claude, Settings > Connectors > Add custom connector: `https://<your-worker-host>/mcp`. Log in with Splitwise. Grant `read` and `add`.
@@ -88,7 +92,7 @@ npm run smoke:worker     # boots wrangler dev and checks the OAuth plumbing
 4. [docs/decisions/](docs/decisions/): why each big choice was made.
 5. [docs/build-log.md](docs/build-log.md): every problem hit while building, the cause, and the fix.
 6. [docs/research/](docs/research/): product audit, user voice, teardown of the unofficial servers, state of MCP.
-7. [docs/metrics.md](docs/metrics.md) and [docs/SECURITY.md](docs/SECURITY.md).
+7. [docs/metrics.md](docs/metrics.md), [docs/SECURITY.md](docs/SECURITY.md), and [docs/retrospective.md](docs/retrospective.md).
 
 ## Not affiliated with Splitwise
 

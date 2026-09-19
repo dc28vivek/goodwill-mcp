@@ -22,7 +22,7 @@ interface Scenario {
   note?: string;
 }
 
-const STATE_KEY = 'fairsplit-evals-key-0123456789abcdef0123456789';
+const STATE_KEY = 'goodwill-evals-key-0123456789abcdef0123456789';
 
 function getPath(obj: unknown, path: string): unknown {
   return path.split('.').reduce<unknown>((acc, key) => {

@@ -34,7 +34,7 @@ async function main() {
     PORT: String(MCP_PORT),
     SPLITWISE_API_KEY: 'test-token',
     SPLITWISE_API_BASE: `http://127.0.0.1:${FAKE_PORT}/api/v3.0`,
-    FAIRSPLIT_STATE_KEY: 'fairsplit-conformance-key-0123456789abcdef',
+    GOODWILL_STATE_KEY: 'goodwill-conformance-key-0123456789abcdef',
   });
   const stop = () => {
     fake.kill();

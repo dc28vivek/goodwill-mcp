@@ -1,7 +1,7 @@
 {
-  "name": "fairsplit-mcp",
+  "name": "goodwill-mcp",
   "version": "0.1.0",
-  "description": "Unofficial Splitwise MCP connector. Product and engineering showcase.",
+  "description": "Goodwill: an unofficial Splitwise MCP server. Explain balances, settle up, add expenses in a sentence. Every write is confirmed and nothing is ever deleted.",
   "main": "index.js",
   "directories": {
     "doc": "docs"

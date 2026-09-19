@@ -5,7 +5,7 @@ import { createDeps } from '../src/server/env.js';
 import { memoryMetrics } from '../src/server/metrics.js';
 import { fakeFetch, makeState, type FakeState } from './fixtures/fakeSplitwise.js';
 
-const STATE_KEY = 'fairsplit-test-key-0123456789abcdef0123456789';
+const STATE_KEY = 'goodwill-test-key-0123456789abcdef0123456789';
 
 async function connect(state: FakeState, answer: boolean | 'decline' = true) {
   const metrics = memoryMetrics();
@@ -23,7 +23,7 @@ async function connect(state: FakeState, answer: boolean | 'decline' = true) {
   return { client, server, prompts, deps, metrics };
 }
 
-describe('fairsplit server', () => {
+describe('goodwill server', () => {
   let state: FakeState;
   beforeEach(() => {
     state = makeState();
