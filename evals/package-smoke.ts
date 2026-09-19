@@ -64,11 +64,11 @@ async function main() {
     checks.push(['server identifies itself', info?.name === 'goodwill-mcp', `name=${info?.name}`]);
 
     const { tools } = await client.listTools();
-    checks.push(['six tools listed', tools.length === 6, tools.map((t) => t.name).join(', ')]);
+    checks.push(['eight tools listed', tools.length === 8, tools.map((t) => t.name).join(', ')]);
 
     const res = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Priya' } });
-    const net = (res.structuredContent as { balances?: { net?: string }[] })?.balances?.[0]?.net;
-    checks.push(['explain_balance returns real data', net === '61.00', `net=${net}`]);
+    const b = (res.structuredContent as { balances?: { charged?: string; remaining?: string }[] })?.balances?.[0];
+    checks.push(['explain_balance returns a statement', b?.charged === '61.00' && b?.remaining === '61.00', `charged=${b?.charged} remaining=${b?.remaining}`]);
 
     const resource = await client.readResource({ uri: 'splitwise://groups' });
     const text = resource.contents[0] && 'text' in resource.contents[0] ? String(resource.contents[0].text) : '';

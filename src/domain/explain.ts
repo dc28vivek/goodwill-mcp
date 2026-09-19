@@ -17,6 +17,16 @@ export interface BalanceExplanation {
   currency: string;
   /** Positive: they owe me. Negative: I owe them. */
   net: Minor;
+  /**
+   * A statement rather than a net, because "why do I owe this much?" is really
+   * three questions: what was I charged for, what have I already settled, and
+   * what is left. `charged` counts expenses only; `settled` counts payments
+   * only. Both are signed the same way as `net`, and `net = charged + settled`.
+   */
+  charged: Minor;
+  settled: Minor;
+  expenseCount: number;
+  paymentCount: number;
   contributions: Contribution[];
 }
 
@@ -72,11 +82,20 @@ export function explainBalance(meId: number, counterpartyId: number, expenses: S
     byCurrency.set(e.currency_code, list);
   }
 
-  return [...byCurrency.entries()].map(([currency, contributions]) => ({
-    meId,
-    counterpartyId,
-    currency,
-    net: contributions.reduce((acc, c) => acc + c.amount, 0),
-    contributions: contributions.sort((a, b) => b.date.localeCompare(a.date)),
-  }));
+  return [...byCurrency.entries()].map(([currency, contributions]) => {
+    const expenses = contributions.filter((c) => c.kind === 'expense');
+    const payments = contributions.filter((c) => c.kind === 'payment');
+    const sum = (list: Contribution[]) => list.reduce((acc, c) => acc + c.amount, 0);
+    return {
+      meId,
+      counterpartyId,
+      currency,
+      net: sum(contributions),
+      charged: sum(expenses),
+      settled: sum(payments),
+      expenseCount: expenses.length,
+      paymentCount: payments.length,
+      contributions: contributions.sort((a, b) => b.date.localeCompare(a.date)),
+    };
+  });
 }

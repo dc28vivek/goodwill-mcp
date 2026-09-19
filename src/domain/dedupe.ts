@@ -122,3 +122,51 @@ export function findDuplicateClusters(expenses: ExpenseLike[], threshold = 0.75)
   }
   return out.sort((a, b) => b.confidence - a.confidence);
 }
+
+/** One line from a card or bank statement, as the model parsed it. */
+export interface Transaction {
+  date: string;
+  /** Decimal string, positive. */
+  amount: string;
+  description: string;
+  currency_code: string;
+}
+
+export interface MissingExpense {
+  transaction: Transaction;
+  /** Weak matches worth showing so the user can judge. Empty when nothing was close. */
+  near: { expenseId: number; description: string; date: string; confidence: number }[];
+}
+
+/**
+ * Find statement lines that are not in Splitwise yet.
+ *
+ * The inverse of findDuplicates: instead of asking "is this already here
+ * twice", it asks "is this here at all". A transaction counts as present when
+ * an expense the user paid for matches it on amount, currency and date, using
+ * the same scoring as duplicate detection.
+ *
+ * `paidByMe` must be the expenses where this user was the payer. A charge on
+ * your card means you paid, so an expense someone else paid is never a match.
+ */
+export function findMissingExpenses(transactions: Transaction[], paidByMe: ExpenseLike[], threshold = 0.75): MissingExpense[] {
+  const missing: MissingExpense[] = [];
+  for (const t of transactions) {
+    const candidate: ExpenseLike = { description: t.description, cost: t.amount, currency_code: t.currency_code, date: t.date, payerId: null };
+    const scored = paidByMe
+      .map((e) => scoreDuplicate({ ...candidate, payerId: e.payerId }, e))
+      .filter((m): m is DuplicateMatch => m !== null)
+      .sort((a, b) => b.confidence - a.confidence);
+    if (scored.some((m) => m.confidence >= threshold)) continue;
+    missing.push({
+      transaction: t,
+      near: scored.slice(0, 2).map((m) => ({
+        expenseId: m.existing.id ?? 0,
+        description: m.existing.description,
+        date: m.existing.date,
+        confidence: m.confidence,
+      })),
+    });
+  }
+  return missing;
+}

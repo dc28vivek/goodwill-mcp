@@ -32,7 +32,7 @@ describe('goodwill server', () => {
   it('lists six tools with honest annotations and fixed order', async () => {
     const { client } = await connect(state);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'nudge']);
+    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'nudge']);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.explain_balance?.annotations?.readOnlyHint).toBe(true);
     expect(byName.add_expense?.annotations?.readOnlyHint).toBe(false);
@@ -49,13 +49,25 @@ describe('goodwill server', () => {
     expect(groups[0].members).toHaveLength(5);
   });
 
-  it('explains what Priya owes', async () => {
+  it('explains what Priya owes as a statement', async () => {
     const { client } = await connect(state);
     const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Priya' } });
-    const sc = r.structuredContent as { balances: { net: string; direction: string; contributions: unknown[] }[] };
-    expect(sc.balances[0]).toMatchObject({ net: '61.00', direction: 'they_owe_you' });
+    const sc = r.structuredContent as { balances: { charged: string; settled: string; remaining: string; direction: string; contributions: unknown[] }[] };
+    expect(sc.balances[0]).toMatchObject({ charged: '61.00', settled: '0.00', remaining: '61.00', direction: 'they_owe_you' });
     expect(sc.balances[0]?.contributions).toHaveLength(2);
-    expect(String((r.content[0] as { text: string }).text)).toContain('Priya S owes you 61.00 EUR');
+    const text = String((r.content[0] as { text: string }).text);
+    expect(text).toContain('Priya S owes you 61.00 EUR');
+    expect(text).toContain('across 2 expenses');
+  });
+
+  it('shows charged, paid back and left when someone has settled part of it', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Sam' } });
+    const sc = r.structuredContent as { balances: { charged: string; settled: string; remaining: string; payment_count: number }[] };
+    expect(sc.balances[0]).toMatchObject({ charged: '69.00', settled: '49.00', remaining: '20.00', payment_count: 1 });
+    const text = String((r.content[0] as { text: string }).text);
+    expect(text).toContain('Paid back');
+    expect(text).toContain('in 1 payment');
   });
 
   it('refuses an ambiguous name with a helpful error', async () => {
@@ -155,5 +167,43 @@ describe('goodwill server', () => {
     expect(types).toContain('write_posted');
     const calls = metrics.events.filter((e) => e.type === 'tool_call');
     expect(calls.map((c) => (c as { round: number }).round)).toEqual([1, 2]);
+  });
+
+  it('reports the overall position across everyone', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'overall_balances', arguments: {} });
+    const sc = r.structuredContent as { positions: { currency: string; owed_to_you: string; you_owe: string; net: string; owed_to_you_by: { person: { name: string } }[] }[] };
+    expect(sc.positions[0]).toMatchObject({ currency: 'EUR', owed_to_you: '81.00', you_owe: '0.00', net: '81.00' });
+    expect(sc.positions[0]?.owed_to_you_by.map((x) => x.person.name)).toEqual(['Priya S', 'Sam K']);
+    expect(String((r.content[0] as { text: string }).text)).toContain('you are owed 81.00');
+  });
+
+  it('finds a card charge that is not in Splitwise, and ignores one that is', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({
+      name: 'find_missing_expenses',
+      arguments: {
+        currency: 'EUR',
+        group_id: 100,
+        transactions: [
+          { date: '2026-09-05', amount: '84.00', description: 'CERVEJARIA LISBOA' },
+          { date: '2026-09-06', amount: '42.00', description: 'BAR DA VELHA' },
+        ],
+      },
+    });
+    const sc = r.structuredContent as { checked: number; already_logged: number; missing: { description: string }[] };
+    expect(sc).toMatchObject({ checked: 2, already_logged: 1 });
+    expect(sc.missing.map((m) => m.description)).toEqual(['BAR DA VELHA']);
+    expect(String((r.content[0] as { text: string }).text)).toContain('1 of 2 transactions are not in Splitwise yet');
+  });
+
+  it('says so when the statement is fully logged', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({
+      name: 'find_missing_expenses',
+      arguments: { currency: 'EUR', group_id: 100, transactions: [{ date: '2026-09-04', amount: '99.00', description: 'AIRBNB PAYMENTS' }] },
+    });
+    expect((r.structuredContent as { missing: unknown[] }).missing).toEqual([]);
+    expect(String((r.content[0] as { text: string }).text)).toContain('already in Splitwise');
   });
 });

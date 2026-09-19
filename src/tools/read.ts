@@ -1,15 +1,16 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
-import { toExpenseLike, findDuplicateClusters } from '../domain/dedupe.js';
+import { type Transaction, findDuplicateClusters, findMissingExpenses, payerOf, toExpenseLike } from '../domain/dedupe.js';
 import { explainBalance } from '../domain/explain.js';
 import { fromMinor, toMinor } from '../domain/money.js';
+import { overallPosition } from '../domain/position.js';
 import { settlePlan } from '../domain/settle.js';
 import { staleBalances } from '../domain/stale.js';
 import type { Deps } from '../server/deps.js';
 import { GROUP_URL, fail, fullName, missingScope, ok, timed, untrusted } from '../server/format.js';
 import { describeResolution, resolveMember } from '../server/resolve.js';
 import type { SwGroup, SwUser } from '../splitwise/types.js';
-import { ExplainOutput, ReconcileOutput, SettleOutput, StaleOutput } from './schemas.js';
+import { ExplainOutput, MissingOutput, OverallOutput, ReconcileOutput, SettleOutput, StaleOutput, TransactionInput } from './schemas.js';
 
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
 
@@ -67,8 +68,12 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         explainBalance(me.id, cp.id, expenses).map((b) => ({
           counterparty: person(cp),
           currency: b.currency,
-          net: fromMinor(b.net),
           direction: direction(b.net),
+          charged: fromMinor(Math.abs(b.charged)),
+          settled: fromMinor(Math.abs(b.settled)),
+          remaining: fromMinor(Math.abs(b.net)),
+          expense_count: b.expenseCount,
+          payment_count: b.paymentCount,
           contributions: b.contributions.map((c) => ({
             expense_id: c.expenseId,
             description: untrusted(c.description),
@@ -79,14 +84,125 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         })),
       );
 
+      // A statement, not a net: charged, settled, left. That is the shape of the
+      // question people actually ask.
       const lines = balances.map((b) => {
         const who = b.counterparty.name;
         const head =
-          b.direction === 'they_owe_you' ? `${who} owes you ${b.net} ${b.currency}` : b.direction === 'you_owe_them' ? `You owe ${who} ${fromMinor(-toMinor(b.net))} ${b.currency}` : `You and ${who} are settled in ${b.currency}`;
+          b.direction === 'they_owe_you'
+            ? `${who} owes you ${b.remaining} ${b.currency}`
+            : b.direction === 'you_owe_them'
+              ? `You owe ${who} ${b.remaining} ${b.currency}`
+              : `You and ${who} are settled in ${b.currency}`;
+        if (b.direction === 'settled' && b.expense_count === 0) return head;
+        const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+        const mine = b.direction === 'you_owe_them';
+        const rows: [string, string, string][] = [
+          [mine ? 'You were charged' : `${who} was charged`, b.charged, `across ${plural(b.expense_count, 'expense')}`],
+          [mine ? 'You have paid back' : 'Paid back', b.settled, b.payment_count ? `in ${plural(b.payment_count, 'payment')}` : ''],
+          ['Left', b.remaining, ''],
+        ];
+        const labelWidth = Math.max(...rows.map(([label]) => label.length));
+        const amountWidth = Math.max(...rows.map(([, amount]) => amount.length));
+        const statement = rows.map(
+          ([label, amount, note]) => `  ${label.padEnd(labelWidth)}  ${amount.padStart(amountWidth)} ${b.currency}${note ? `  ${note}` : ''}`,
+        );
         const items = b.contributions.slice(0, 8).map((c) => `  ${c.date}  ${c.amount.padStart(9)}  ${c.kind === 'payment' ? '(payment) ' : ''}${c.description}`);
-        return [head, ...items].join('\n');
+        return [head, ...statement, '', ...items].join('\n');
       });
       return ok(lines.length ? lines.join('\n\n') : 'No shared expenses found.', { me: person(me), balances });
+    }),
+  );
+
+  server.registerTool(
+    'overall_balances',
+    {
+      title: 'Your overall position',
+      description:
+        'Everything you owe and everything you are owed, across every group and friend, one line per currency. Use this for "how much do I owe overall", "who owes me money", or "what is my total exposure". Start here before drilling into one group with explain_balance.',
+      inputSchema: z.object({}).describe('No arguments.'),
+      outputSchema: OverallOutput,
+      annotations: READ,
+    },
+    timed(deps.metrics, 'overall_balances', async (_args, ctx) => {
+      const denied = missingScope(ctx, 'read');
+      if (denied) return denied;
+      const [me, friends] = await Promise.all([deps.me(), deps.client.friends()]);
+      const positions = overallPosition(friends).map((pos) => ({
+        currency: pos.currency,
+        owed_to_you: fromMinor(pos.owedToMe),
+        you_owe: fromMinor(pos.iOwe),
+        net: fromMinor(pos.net),
+        owed_to_you_by: pos.owedToMeBy.map((x) => ({ person: { id: x.userId, name: untrusted(x.name, 60) }, amount: fromMinor(x.amount) })),
+        you_owe_to: pos.iOweTo.map((x) => ({ person: { id: x.userId, name: untrusted(x.name, 60) }, amount: fromMinor(x.amount) })),
+      }));
+
+      if (positions.length === 0) return ok('You are completely settled up. Nobody owes you anything and you owe nobody.', { me: person(me), positions });
+
+      const blocks = positions.map((pos) => {
+        const lines = [`${pos.currency}: you are owed ${pos.owed_to_you} and you owe ${pos.you_owe} (net ${pos.net})`];
+        for (const x of pos.owed_to_you_by) lines.push(`  ${x.person.name} owes you ${x.amount}`);
+        for (const x of pos.you_owe_to) lines.push(`  You owe ${x.person.name} ${x.amount}`);
+        return lines.join('\n');
+      });
+      return ok(blocks.join('\n\n'), { me: person(me), positions });
+    }),
+  );
+
+  server.registerTool(
+    'find_missing_expenses',
+    {
+      title: 'Find spending not yet in Splitwise',
+      description:
+        'Check a list of card or bank transactions against Splitwise and report which ones have not been added yet. Paste a statement and read the rows into the transactions argument; this tool does the matching. A transaction counts as already logged when an expense you paid for matches it on amount, currency and date. Read-only: it never adds anything, it only tells you what is missing so you can add it with add_expense.',
+      inputSchema: z.object({
+        transactions: z.array(TransactionInput).min(1).max(200).describe('Rows from a statement. Only charges you paid; ignore refunds and incoming payments.'),
+        currency: z.string().length(3).default('USD').describe('Currency of the statement, unless a row overrides it.'),
+        group_id: z.number().int().optional().describe('Limit the comparison to one group. Otherwise checks all your expenses.'),
+        window_days: z.number().int().min(1).max(365).default(45).describe('How far either side of the statement dates to look for a match.'),
+      }),
+      outputSchema: MissingOutput,
+      annotations: READ,
+    },
+    timed(deps.metrics, 'find_missing_expenses', async ({ transactions, currency, group_id, window_days }, ctx) => {
+      const denied = missingScope(ctx, 'read');
+      if (denied) return denied;
+      const me = await deps.me();
+
+      const rows: Transaction[] = transactions.map((t) => ({
+        date: t.date.length === 10 ? `${t.date}T12:00:00Z` : t.date,
+        amount: t.amount,
+        description: untrusted(t.description, 120),
+        currency_code: (t.currency ?? currency).toUpperCase(),
+      }));
+
+      const dates = rows.map((r) => r.date).sort();
+      const span = window_days * 86_400_000;
+      const after = new Date(new Date(dates[0]!).getTime() - span).toISOString();
+      const before = new Date(new Date(dates[dates.length - 1]!).getTime() + span).toISOString();
+
+      const all = await deps.client.allExpenses(group_id !== undefined ? { group_id, dated_after: after } : { dated_after: after });
+      // A charge on your card means you paid, so only expenses you paid can match.
+      const paidByMe = all
+        .filter((e) => !e.deleted_at && !e.payment && e.date <= before && payerOf(e) === me.id)
+        .map(toExpenseLike);
+
+      const missing = findMissingExpenses(rows, paidByMe).map((m) => ({
+        date: m.transaction.date.slice(0, 10),
+        amount: m.transaction.amount,
+        currency: m.transaction.currency_code,
+        description: m.transaction.description,
+        near_matches: m.near.map((n) => ({ expense_id: n.expenseId, description: untrusted(n.description), date: n.date.slice(0, 10), confidence: n.confidence })),
+      }));
+
+      const text = missing.length
+        ? [`${missing.length} of ${rows.length} transactions are not in Splitwise yet:`, ...missing.map((m) => {
+            const near = m.near_matches[0];
+            return `  ${m.date}  ${m.amount.padStart(9)} ${m.currency}  ${m.description}${near ? `   (close to #${near.expense_id} "${near.description}" on ${near.date})` : ''}`;
+          }), '', 'Add any of these with add_expense. It will show you the split before posting.'].join('\n')
+        : `All ${rows.length} transactions are already in Splitwise.`;
+
+      return ok(text, { checked: rows.length, already_logged: rows.length - missing.length, missing });
     }),
   );
 

@@ -34,24 +34,29 @@ Your key stays on your machine. Nothing is sent anywhere except Splitwise's own 
 
 ## What you can ask it
 
-- *"What are my Splitwise groups?"*
-- *"Why do I owe Priya money?"* — the number, and the expenses behind it
-- *"Who's more than 30 days late paying me back?"*
+- *"How much do I owe overall, and how much is owed to me?"*
+- *"Why do I owe Priya 61?"* — what you were charged, what you've paid back, what's left
+- *"Here's my card statement — which of these aren't in Splitwise yet?"*
 - *"Any duplicate expenses in the Lisbon group?"*
+- *"Who's more than 30 days late paying me back?"*
 - *"How do we settle Lisbon?"* — the fewest payments that close the group
 - *"Add dinner 84, I paid, split with everyone"* — shows the split and who it affects, then waits
 - *"Remind Sam, gently"* — drafts a comment in the tone you pick, then waits
 
-Six tools, three resources, one prompt:
+Eight tools, three resources, one prompt:
 
 | Tool | What it does | Writes? |
 |---|---|---|
-| `explain_balance` | The number and the expenses behind it | no |
+| `explain_balance` | Charged, paid back, and what's left, with the expenses behind it | no |
+| `overall_balances` | Everything you owe and are owed, across every group | no |
+| `find_missing_expenses` | Which card transactions haven't been added to Splitwise yet | no |
 | `stale_balances` | Who is late, by how long | no |
 | `settle_plan` | Minimum payments to close a group, checked against Splitwise | no |
 | `find_duplicates` | Likely duplicates with a confidence and a suggested action | no |
 | `add_expense` | A sentence or fields, a preview, then a confirmed post | after confirmation |
 | `nudge` | A drafted reminder, posted as a comment | after confirmation |
+
+`find_missing_expenses` and `find_duplicates` are two halves of the same job: making the ledger match reality. One finds what's missing from Splitwise, the other finds what's in there twice.
 
 Resources: `splitwise://groups`, `splitwise://categories`, `splitwise://currencies`. Prompt: `close_out_trip`.
 

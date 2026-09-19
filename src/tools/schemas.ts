@@ -18,8 +18,13 @@ export const ExplainOutput = z.object({
     z.object({
       counterparty: Person,
       currency: z.string(),
-      net: Money,
       direction: z.enum(['they_owe_you', 'you_owe_them', 'settled']),
+      /** The three numbers that answer "why do I owe this much?". All positive. */
+      charged: Money.describe('Total across shared expenses, before any settling up.'),
+      settled: Money.describe('Total already paid back, across payments.'),
+      remaining: Money.describe('What is still open. charged minus settled.'),
+      expense_count: z.number(),
+      payment_count: z.number(),
       contributions: z.array(Contribution),
     }),
   ),
@@ -86,4 +91,39 @@ export const NudgeOutput = z.object({
 
 export const ConfirmSchema = z.object({
   confirm: z.boolean().describe('true to go ahead, false to cancel'),
+});
+
+export const OverallOutput = z.object({
+  me: Person,
+  positions: z.array(
+    z.object({
+      currency: z.string(),
+      owed_to_you: Money,
+      you_owe: Money,
+      net: Money.describe('Positive means you are up overall in this currency.'),
+      owed_to_you_by: z.array(z.object({ person: Person, amount: Money })),
+      you_owe_to: z.array(z.object({ person: Person, amount: Money })),
+    }),
+  ),
+});
+
+export const TransactionInput = z.object({
+  date: z.string().describe('YYYY-MM-DD, or a full ISO timestamp.'),
+  amount: Money.describe('Positive decimal string, e.g. "42.00".'),
+  description: z.string().max(200).describe('Merchant name as it appears on the statement.'),
+  currency: z.string().length(3).optional().describe('Defaults to the currency argument.'),
+});
+
+export const MissingOutput = z.object({
+  checked: z.number(),
+  already_logged: z.number(),
+  missing: z.array(
+    z.object({
+      date: z.string(),
+      amount: Money,
+      currency: z.string(),
+      description: z.string(),
+      near_matches: z.array(z.object({ expense_id: z.number(), description: z.string(), date: z.string(), confidence: z.number() })),
+    }),
+  ),
 });

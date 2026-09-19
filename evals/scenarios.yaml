@@ -13,9 +13,11 @@
   args: { group_id: 100, friend: "Priya" }
   expect:
     isError: false
-    structured.balances.0.net: "61.00"
+    structured.balances.0.charged: "61.00"
+    structured.balances.0.settled: "0.00"
+    structured.balances.0.remaining: "61.00"
     structured.balances.0.direction: they_owe_you
-    text_includes: ["Priya S owes you 61.00 EUR", "Dinner at Cervejaria", "Airbnb"]
+    text_includes: ["Priya S owes you 61.00 EUR", "across 2 expenses", "Dinner at Cervejaria", "Airbnb"]
 
 - id: explain-group
   model: true
@@ -36,6 +38,47 @@
   expect:
     isError: true
     text_includes: ["matches 2 people"]
+
+- id: overall-position
+  model: true
+  model_args_include: {}
+  prompt: "How much do I owe overall, and how much is owed to me?"
+  tool: overall_balances
+  args: {}
+  expect:
+    isError: false
+    structured.positions.0.owed_to_you: "81.00"
+    structured.positions.0.you_owe: "0.00"
+    text_includes: ["you are owed 81.00", "Priya S owes you 61.00"]
+
+- id: missing-from-card
+  prompt: "Here are two charges from my card. Which ones aren't in Splitwise yet?"
+  tool: find_missing_expenses
+  args:
+    currency: EUR
+    group_id: 100
+    transactions:
+      - { date: "2026-09-05", amount: "84.00", description: "CERVEJARIA LISBOA" }
+      - { date: "2026-09-06", amount: "42.00", description: "BAR DA VELHA" }
+  expect:
+    isError: false
+    structured.checked: 2
+    structured.already_logged: 1
+    structured.missing.0.description: "BAR DA VELHA"
+    text_includes: ["1 of 2 transactions are not in Splitwise yet"]
+
+- id: missing-none
+  prompt: "Is this Airbnb charge already split?"
+  tool: find_missing_expenses
+  args:
+    currency: EUR
+    group_id: 100
+    transactions:
+      - { date: "2026-09-04", amount: "99.00", description: "AIRBNB PAYMENTS" }
+  expect:
+    isError: false
+    structured.already_logged: 1
+    text_includes: ["already in Splitwise"]
 
 - id: stale-none-recent
   model: true
