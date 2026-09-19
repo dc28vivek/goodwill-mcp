@@ -13,7 +13,8 @@ if (!token) {
 // One process serves one user, so a per-process key and an in-memory log are fine here.
 const stateKey = process.env.FAIRSPLIT_STATE_KEY ?? randomStateKey();
 const writeLog = new MemoryWriteLog();
-const deps = createDeps({ token, stateKey, writeLog });
+const baseUrl = process.env.SPLITWISE_API_BASE;
+const deps = createDeps({ token, stateKey, writeLog, ...(baseUrl ? { baseUrl } : {}) });
 
 serveStdio(() => buildServer(deps));
 process.stderr.write('fairsplit-mcp: serving over stdio\n');

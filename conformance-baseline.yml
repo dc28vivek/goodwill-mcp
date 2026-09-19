@@ -1,0 +1,46 @@
+# Expected failures for `npm run conformance` (official MCP conformance suite 0.1.16).
+#
+# Every entry here fails for one of two reasons, neither of which is a protocol
+# defect in this server:
+#
+# 1. The scenario targets the reference "everything" server and calls a tool,
+#    resource, or prompt that only exists there (test_simple_text,
+#    test://static-text, test_simple_prompt, and so on).
+# 2. The scenario exercises a feature this server does not implement on purpose:
+#    logging/setLevel and completion/complete (deprecated in 2026-07-28), and
+#    resources/subscribe (replaced by subscriptions/listen; nothing here changes).
+#
+# The generic scenarios pass: server-initialize, ping, tools-list, resources-list,
+# prompts-list, dns-rebinding-protection.
+#
+# If a scenario in this list starts passing, the CLI exits 1 and asks you to remove it.
+server:
+  # reference-server tools
+  - tools-call-simple-text
+  - tools-call-image
+  - tools-call-audio
+  - tools-call-embedded-resource
+  - tools-call-mixed-content
+  - tools-call-with-logging
+  - tools-call-error
+  - tools-call-with-progress
+  - tools-call-sampling
+  - tools-call-elicitation
+  - elicitation-sep1034-defaults
+  - elicitation-sep1330-enums
+  # reference-server resources and prompts
+  - resources-read-text
+  - resources-read-binary
+  - resources-templates-read
+  - prompts-get-simple
+  - prompts-get-with-args
+  - prompts-get-embedded-resource
+  - prompts-get-with-image
+  # features not implemented on purpose
+  # (the stateless legacy fallback answers GET with 405, so there are no 2025-style
+  # server-initiated SSE streams to test; the scenario reports a warning)
+  - server-sse-multiple-streams
+  - logging-set-level
+  - completion-complete
+  - resources-subscribe
+  - resources-unsubscribe

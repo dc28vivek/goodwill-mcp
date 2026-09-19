@@ -10,12 +10,18 @@ export interface DepsOptions {
   writeLog?: WriteLog;
   fetch?: typeof fetch;
   now?: () => Date;
+  /** Test-only override of the Splitwise API base URL. Production always uses the real host. */
+  baseUrl?: string;
 }
 
 export function createDeps(opts: DepsOptions): Deps {
   const codec = createRequestStateCodec<PendingWrite>({ key: opts.stateKey, ttlSeconds: 600 });
   return makeDeps({
-    client: new SplitwiseClient({ token: opts.token, ...(opts.fetch ? { fetch: opts.fetch } : {}) }),
+    client: new SplitwiseClient({
+      token: opts.token,
+      ...(opts.fetch ? { fetch: opts.fetch } : {}),
+      ...(opts.baseUrl ? { baseUrl: opts.baseUrl } : {}),
+    }),
     writeLog: opts.writeLog ?? new MemoryWriteLog(),
     codec,
     now: opts.now ?? (() => new Date()),
