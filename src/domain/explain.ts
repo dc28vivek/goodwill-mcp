@@ -20,6 +20,8 @@ export interface Contribution {
   amount: Minor;
   /** What the whole expense cost, so a share can be read against it. */
   total: Minor;
+  /** Which group it belongs to, or null for a direct expense between two people. */
+  groupId: number | null;
   kind: 'expense' | 'payment';
 }
 
@@ -123,6 +125,7 @@ export function explainBalance(meId: number, counterpartyId: number, expenses: S
       currency: e.currency_code,
       amount,
       total: toMinor(e.cost),
+      groupId: e.group_id && e.group_id !== 0 ? e.group_id : null,
       kind: e.payment ? 'payment' : 'expense',
     });
     byCurrency.set(e.currency_code, list);

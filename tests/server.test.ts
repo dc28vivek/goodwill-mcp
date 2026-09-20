@@ -118,6 +118,63 @@ describe('splittab server', () => {
     }
   });
 
+  it('explaining a friend without naming a group agrees with the overall balance', async () => {
+    const { client } = await connect(state);
+    // The friend path used to look only at expenses outside every group, so it
+    // answered "settled, 0.00" while overall_balances reported the real figure.
+    // Two numbers for one question, and the wrong one sounded confident.
+    const overall = await client.callTool({ name: 'overall_balances', arguments: {} });
+    const owed = (overall.structuredContent as { positions: { owed_to_you_by: { person: { name: string }; amount: string }[] }[] }).positions
+      .flatMap((p) => p.owed_to_you_by)
+      .find((x) => x.person.name.startsWith('Priya'));
+    expect(owed?.amount).toBe('61.00');
+
+    const explained = await client.callTool({ name: 'explain_balance', arguments: { friend: 'Priya' } });
+    const bal = (explained.structuredContent as { balances: { remaining: string; direction: string; spans_groups: string[] }[] }).balances[0];
+    expect(bal?.remaining).toBe('61.00');
+    expect(bal?.direction).toBe('they_owe_you');
+    expect(bal?.spans_groups).toContain('Lisbon');
+  });
+
+  it('says which group a cross-group balance came from', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'explain_balance', arguments: { friend: 'Priya' } });
+    const text = String((r.content[0] as { text: string }).text);
+    expect(text).toContain('Lisbon');
+    const sc = r.structuredContent as { balances: { contributions: { group: string | null }[] }[] };
+    for (const c of sc.balances[0]!.contributions) expect(c.group).toBe('Lisbon');
+  });
+
+  it('takes a group by name, which is how people refer to groups', async () => {
+    const { client } = await connect(state);
+    const byName = await client.callTool({ name: 'settle_plan', arguments: { group: 'Lisbon' } });
+    const byId = await client.callTool({ name: 'settle_plan', arguments: { group: 100 } });
+    expect(byName.isError).toBeFalsy();
+    expect(byName.structuredContent).toEqual(byId.structuredContent);
+  });
+
+  it('matches a group name regardless of case', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'find_duplicates', arguments: { group: 'lisbon' } });
+    expect(r.isError).toBeFalsy();
+  });
+
+  it('lists the real groups when the name is wrong, instead of only refusing', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'settle_plan', arguments: { group: 'Reykjavik' } });
+    expect(r.isError).toBeTruthy();
+    const text = String((r.content[0] as { text: string }).text);
+    expect(text).toContain('no group called "Reykjavik"');
+    expect(text).toContain('Lisbon (id 100)');
+  });
+
+  it('takes a group name on a write tool too', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'add_expense', arguments: { group: 'Lisbon', text: 'coffee 10' } });
+    // A write answers with a preview rather than an error.
+    expect(r.isError).toBeFalsy();
+  });
+
   it('serves the groups resource trimmed', async () => {
     const { client } = await connect(state);
     const res = await client.readResource({ uri: 'splitwise://groups' });
@@ -129,7 +186,7 @@ describe('splittab server', () => {
 
   it('explains what Priya owes as a statement', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Priya' } });
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group: 100, friend: 'Priya' } });
     const sc = r.structuredContent as { balances: { charged: string; settled: string; remaining: string; direction: string; contributions: unknown[] }[] };
     expect(sc.balances[0]).toMatchObject({ charged: '61.00', settled: '0.00', remaining: '61.00', direction: 'they_owe_you' });
     expect(sc.balances[0]?.contributions).toHaveLength(2);
@@ -140,7 +197,7 @@ describe('splittab server', () => {
 
   it('shows charged, paid back and left when someone has settled part of it', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Sam' } });
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group: 100, friend: 'Sam' } });
     const sc = r.structuredContent as { balances: { charged: string; settled: string; remaining: string; payment_count: number }[] };
     expect(sc.balances[0]).toMatchObject({ charged: '69.00', settled: '49.00', remaining: '20.00', payment_count: 1 });
     const text = String((r.content[0] as { text: string }).text);
@@ -151,14 +208,14 @@ describe('splittab server', () => {
 
   it('refuses an ambiguous name with a helpful error', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Alex' } });
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group: 100, friend: 'Alex' } });
     expect(r.isError).toBe(true);
     expect((r.content[0] as { text: string }).text).toContain('matches 2 people');
   });
 
   it('plans a settle-up that matches Splitwise', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'settle_plan', arguments: { group_id: 100 } });
+    const r = await client.callTool({ name: 'settle_plan', arguments: { group: 100 } });
     const sc = r.structuredContent as { plans: { payments: { from: { name: string }; to: { name: string }; amount: string }[]; matches_splitwise: boolean }[] };
     expect(sc.plans[0]?.payments).toEqual([
       { from: { id: 2, name: 'Priya S' }, to: { id: 1, name: 'Vivek D' }, amount: '61.00' },
@@ -169,10 +226,10 @@ describe('splittab server', () => {
 
   it('finds no duplicates in a clean group and one after a double post', async () => {
     const { client } = await connect(state);
-    const clean = await client.callTool({ name: 'find_duplicates', arguments: { group_id: 100 } });
+    const clean = await client.callTool({ name: 'find_duplicates', arguments: { group: 100 } });
     expect((clean.structuredContent as { clusters: unknown[] }).clusters).toHaveLength(0);
     state.expenses.push({ ...state.expenses[0]!, id: 7777, date: '2026-09-05T21:00:00Z' });
-    const dirty = await client.callTool({ name: 'find_duplicates', arguments: { group_id: 100 } });
+    const dirty = await client.callTool({ name: 'find_duplicates', arguments: { group: 100 } });
     const sc = dirty.structuredContent as { clusters: { suspect: { expense_id: number }; keep: { expense_id: number } }[] };
     expect(sc.clusters).toHaveLength(1);
     expect(sc.clusters[0]?.suspect.expense_id).toBe(7777);
@@ -180,7 +237,7 @@ describe('splittab server', () => {
 
   it('adds an expense after confirmation with exact shares', async () => {
     const { client, prompts } = await connect(state, true);
-    const r = await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'coffee 10, I paid, split with me, Priya and Sam' } });
+    const r = await client.callTool({ name: 'add_expense', arguments: { group: 100, text: 'coffee 10, I paid, split with me, Priya and Sam' } });
     expect(r.isError).toBeFalsy();
     expect(prompts[0]).toContain('Add "coffee" for 10.00 EUR to Lisbon');
     expect(prompts[0]).toContain('This changes what Priya S and Sam K owe');
@@ -197,28 +254,28 @@ describe('splittab server', () => {
 
   it('does not post when the user declines', async () => {
     const { client } = await connect(state, 'decline');
-    const r = await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'coffee 10' } });
+    const r = await client.callTool({ name: 'add_expense', arguments: { group: 100, text: 'coffee 10' } });
     expect((r.structuredContent as { posted: boolean }).posted).toBe(false);
     expect(state.writes).toHaveLength(0);
   });
 
   it('refuses to post the same expense twice', async () => {
     const { client } = await connect(state, true);
-    await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'coffee 10' } });
-    const again = await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'Coffee 10.00' } });
+    await client.callTool({ name: 'add_expense', arguments: { group: 100, text: 'coffee 10' } });
+    const again = await client.callTool({ name: 'add_expense', arguments: { group: 100, text: 'Coffee 10.00' } });
     expect((again.structuredContent as { posted: boolean; note: string }).posted).toBe(false);
     expect(state.writes.filter((w) => w.path === '/create_expense')).toHaveLength(1);
   });
 
   it('warns about a likely duplicate already in Splitwise', async () => {
     const { client, prompts } = await connect(state, 'decline');
-    await client.callTool({ name: 'add_expense', arguments: { group_id: 100, description: 'Dinner Cervejaria', cost: '84.00', date: '2026-09-05' } });
+    await client.callTool({ name: 'add_expense', arguments: { group: 100, description: 'Dinner Cervejaria', cost: '84.00', date: '2026-09-05' } });
     expect(prompts[0]).toContain('Possible duplicate');
   });
 
   it('asks for what is missing', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'lunch with Sam' } });
+    const r = await client.callTool({ name: 'add_expense', arguments: { group: 100, text: 'lunch with Sam' } });
     expect(r.isError).toBe(true);
     expect((r.content[0] as { text: string }).text).toContain('cost');
   });
@@ -227,7 +284,7 @@ describe('splittab server', () => {
 
   it('emits product metrics for a confirmed write', async () => {
     const { client, metrics } = await connect(state, true);
-    await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'coffee 10' } });
+    await client.callTool({ name: 'add_expense', arguments: { group: 100, text: 'coffee 10' } });
     const types = metrics.events.map((e) => e.type);
     expect(types).toContain('preview_shown');
     expect(types).toContain('preview_confirmed');
@@ -251,7 +308,7 @@ describe('splittab server', () => {
       name: 'find_missing_expenses',
       arguments: {
         currency: 'EUR',
-        group_id: 100,
+        group: 100,
         transactions: [
           { date: '2026-09-05', amount: '84.00', description: 'CERVEJARIA LISBOA' },
           { date: '2026-09-06', amount: '42.00', description: 'BAR DA VELHA' },
@@ -268,7 +325,7 @@ describe('splittab server', () => {
     const { client } = await connect(state);
     const r = await client.callTool({
       name: 'find_missing_expenses',
-      arguments: { currency: 'EUR', group_id: 100, transactions: [{ date: '2026-09-04', amount: '99.00', description: 'AIRBNB PAYMENTS' }] },
+      arguments: { currency: 'EUR', group: 100, transactions: [{ date: '2026-09-04', amount: '99.00', description: 'AIRBNB PAYMENTS' }] },
     });
     expect((r.structuredContent as { missing: unknown[] }).missing).toEqual([]);
     expect(String((r.content[0] as { text: string }).text)).toContain('already in Splitwise');
@@ -276,7 +333,7 @@ describe('splittab server', () => {
 
   it('records a settlement for the full outstanding balance', async () => {
     const { client, prompts } = await connect(state, true);
-    const r = await client.callTool({ name: 'settle_up', arguments: { friend: 'Priya', group_id: 100 } });
+    const r = await client.callTool({ name: 'settle_up', arguments: { friend: 'Priya', group: 100 } });
     expect(prompts[0]).toContain('Priya S paid you 61.00 EUR');
     expect(prompts[0]).toContain('This closes the balance with Priya S');
     const sc = r.structuredContent as { recorded: boolean; amount: string };
@@ -288,13 +345,13 @@ describe('splittab server', () => {
 
   it('records a partial settlement and says what is left', async () => {
     const { client, prompts } = await connect(state, true);
-    await client.callTool({ name: 'settle_up', arguments: { friend: 'Priya', group_id: 100, amount: '20.00', direction: 'they_paid' } });
+    await client.callTool({ name: 'settle_up', arguments: { friend: 'Priya', group: 100, amount: '20.00', direction: 'they_paid' } });
     expect(prompts[0]).toContain('41.00 EUR would still be open');
   });
 
   it('refuses to settle with someone who owes nothing', async () => {
     const { client } = await connect(state, true);
-    const r = await client.callTool({ name: 'settle_up', arguments: { friend: 'Alex Brown', group_id: 100 } });
+    const r = await client.callTool({ name: 'settle_up', arguments: { friend: 'Alex Brown', group: 100 } });
     expect(r.isError).toBe(true);
     expect((r.content[0] as { text: string }).text).toContain('nothing outstanding');
   });
@@ -304,7 +361,7 @@ describe('splittab server', () => {
     const r = await client.callTool({
       name: 'split_by_items',
       arguments: {
-        group_id: 100,
+        group: 100,
         description: 'Dinner at Ramiro',
         currency: 'EUR',
         items: [
@@ -331,7 +388,7 @@ describe('splittab server', () => {
     const r = await client.callTool({
       name: 'split_by_items',
       arguments: {
-        group_id: 100,
+        group: 100,
         description: 'Misread receipt',
         currency: 'EUR',
         items: [{ description: 'Steak', amount: '30.00', shared_by: ['me'] }],
@@ -348,7 +405,7 @@ describe('splittab server', () => {
     const { client } = await connect(state, true);
     const r = await client.callTool({
       name: 'split_by_items',
-      arguments: { group_id: 100, description: 'Lunch', currency: 'EUR', items: [{ description: 'Soup', amount: '9.00', shared_by: ['Zed'] }] },
+      arguments: { group: 100, description: 'Lunch', currency: 'EUR', items: [{ description: 'Soup', amount: '9.00', shared_by: ['Zed'] }] },
     });
     expect(r.isError).toBe(true);
     expect((r.content[0] as { text: string }).text).toContain('not a member');
@@ -357,7 +414,7 @@ describe('splittab server', () => {
 
   it('drops per-person expense lists only when the answer covers too many people', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100 } });
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group: 100 } });
     const sc = r.structuredContent as { balances: { contributions: unknown[] }[] };
     // Four counterparties in this group, over the detail limit.
     for (const b of sc.balances) expect(b.contributions).toEqual([]);
@@ -370,7 +427,7 @@ describe('splittab server', () => {
     // Trim to two other members, as a couple or a small trip would be.
     state.groups[0]!.members = state.groups[0]!.members.filter((m) => [1, 2, 3].includes(m.id));
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100 } });
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group: 100 } });
     const sc = r.structuredContent as { balances: { contributions: { description: string }[] }[] };
     expect(sc.balances[0]?.contributions.length).toBeGreaterThan(0);
     expect(String((r.content[0] as { text: string }).text)).toContain('Dinner at Cervejaria');
@@ -378,7 +435,7 @@ describe('splittab server', () => {
 
   it('shows each expense with its total and what share it was', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Priya' } });
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group: 100, friend: 'Priya' } });
     const sc = r.structuredContent as { balances: { contributions: { description: string; amount: string; total: string; share_percent: number | null }[] }[] };
     const dinner = sc.balances[0]?.contributions.find((c) => c.description.startsWith('Dinner'));
     // 84.00 split three ways: her 28.00 is a third of it.
@@ -388,7 +445,7 @@ describe('splittab server', () => {
 
   it('leaves the share percentage null for payments, where it means nothing', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Sam' } });
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group: 100, friend: 'Sam' } });
     const sc = r.structuredContent as { balances: { contributions: { kind: string; share_percent: number | null }[] }[] };
     const payment = sc.balances[0]?.contributions.find((c) => c.kind === 'payment');
     expect(payment?.share_percent).toBeNull();
@@ -396,7 +453,7 @@ describe('splittab server', () => {
 
   it('still gives the full expense list when one person is named', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Priya' } });
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group: 100, friend: 'Priya' } });
     const sc = r.structuredContent as { balances: { contributions: unknown[] }[] };
     expect(sc.balances[0]?.contributions).toHaveLength(2);
     expect(String((r.content[0] as { text: string }).text)).toContain('Dinner at Cervejaria');
@@ -429,7 +486,7 @@ describe('splittab server', () => {
 
   it('adds people to an existing group and skips those already in it', async () => {
     const { client, prompts } = await connect(state, true);
-    const r = await client.callTool({ name: 'add_to_group', arguments: { group_id: 100, members: ['Priya', 'nisha@example.com'] } });
+    const r = await client.callTool({ name: 'add_to_group', arguments: { group: 100, members: ['Priya', 'nisha@example.com'] } });
     expect(prompts[0]).toContain('Skipping, already in the group: Priya S');
     expect(prompts[0]).toContain("They will see the group's whole expense history");
     const sc = r.structuredContent as { added: boolean; members: { name: string; status: string }[] };
@@ -440,14 +497,14 @@ describe('splittab server', () => {
 
   it('says so when everyone named is already in the group', async () => {
     const { client } = await connect(state, true);
-    const r = await client.callTool({ name: 'add_to_group', arguments: { group_id: 100, members: ['Priya', 'Sam'] } });
+    const r = await client.callTool({ name: 'add_to_group', arguments: { group: 100, members: ['Priya', 'Sam'] } });
     expect((r.structuredContent as { added: boolean }).added).toBe(false);
     expect(state.writes).toHaveLength(0);
   });
 
   it('can explain from the last payment, carrying the unpaid remainder forward', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Sam', since: 'last_payment' } });
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group: 100, friend: 'Sam', since: 'last_payment' } });
     const sc = r.structuredContent as { balances: { since: string; brought_forward: string; remaining: string; expense_count: number }[] };
     // Sam was charged 69 and paid 49 on 2026-09-06, and nothing has happened since.
     expect(sc.balances[0]).toMatchObject({ since: 'last_payment', brought_forward: '20.00', remaining: '20.00', expense_count: 0 });
@@ -459,7 +516,7 @@ describe('splittab server', () => {
 
   it('can explain from a date', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Priya', since: '2026-09-04' } });
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group: 100, friend: 'Priya', since: '2026-09-04' } });
     const sc = r.structuredContent as { balances: { since: string; brought_forward: string; remaining: string }[] };
     // The Airbnb on the 4th is carried forward; only the dinner on the 5th is listed.
     expect(sc.balances[0]).toMatchObject({ since: 'date', brought_forward: '33.00', remaining: '61.00' });
@@ -468,21 +525,21 @@ describe('splittab server', () => {
   it('reports the same balance whichever window is asked for', async () => {
     const { client } = await connect(state);
     for (const since of ['last_settled', 'last_payment', 'all', '2026-09-04']) {
-      const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Sam', since } });
+      const r = await client.callTool({ name: 'explain_balance', arguments: { group: 100, friend: 'Sam', since } });
       expect((r.structuredContent as { balances: { remaining: string }[] }).balances[0]?.remaining).toBe('20.00');
     }
   });
 
   it('rejects a window it does not understand', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Sam', since: 'whenever' } });
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group: 100, friend: 'Sam', since: 'whenever' } });
     expect(r.isError).toBe(true);
     expect((r.content[0] as { text: string }).text).toContain('is not a window');
   });
 
   it('lists what was spent, so the model can judge what counts as rent', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'list_expenses', arguments: { group_id: 100, since: '2026-09-01', until: '2026-09-30' } });
+    const r = await client.callTool({ name: 'list_expenses', arguments: { group: 100, since: '2026-09-01', until: '2026-09-30' } });
     const sc = r.structuredContent as { returned: number; expenses: { description: string; paid_by: string; your_share: string; split_between: number }[] };
     expect(sc.returned).toBe(3);
     const dinner = sc.expenses.find((e) => e.description.startsWith('Dinner'));
@@ -493,15 +550,15 @@ describe('splittab server', () => {
 
   it('leaves settle-up payments out of spending unless asked', async () => {
     const { client } = await connect(state);
-    const without = await client.callTool({ name: 'list_expenses', arguments: { group_id: 100, since: '2026-09-01' } });
-    const withPayments = await client.callTool({ name: 'list_expenses', arguments: { group_id: 100, since: '2026-09-01', include_payments: true } });
+    const without = await client.callTool({ name: 'list_expenses', arguments: { group: 100, since: '2026-09-01' } });
+    const withPayments = await client.callTool({ name: 'list_expenses', arguments: { group: 100, since: '2026-09-01', include_payments: true } });
     expect((without.structuredContent as { returned: number }).returned).toBe(3);
     expect((withPayments.structuredContent as { returned: number }).returned).toBe(4);
   });
 
   it('narrows on a substring without pretending to understand the word', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'list_expenses', arguments: { group_id: 100, since: '2026-09-01', contains: 'airbnb' } });
+    const r = await client.callTool({ name: 'list_expenses', arguments: { group: 100, since: '2026-09-01', contains: 'airbnb' } });
     const sc = r.structuredContent as { returned: number; expenses: { description: string }[] };
     expect(sc.returned).toBe(1);
     expect(sc.expenses[0]?.description).toBe('Airbnb');
@@ -509,7 +566,7 @@ describe('splittab server', () => {
 
   it('says plainly when nothing matches, rather than returning an empty list silently', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'list_expenses', arguments: { group_id: 100, since: '2026-09-01', contains: 'rent' } });
+    const r = await client.callTool({ name: 'list_expenses', arguments: { group: 100, since: '2026-09-01', contains: 'rent' } });
     expect((r.structuredContent as { returned: number }).returned).toBe(0);
     expect(String((r.content[0] as { text: string }).text)).toContain('No expenses');
   });
@@ -642,7 +699,7 @@ describe('splittab server', () => {
 
   it('can narrow to one group', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'recent_activity', arguments: { since: '2026-09-14', group_id: 100 } });
+    const r = await client.callTool({ name: 'recent_activity', arguments: { since: '2026-09-14', group: 100 } });
     const sc = r.structuredContent as { returned: number; events: { group_id: number | null }[] };
     expect(sc.returned).toBe(4);
     for (const e of sc.events) expect(e.group_id).toBe(100);
@@ -662,7 +719,7 @@ describe('splittab server', () => {
       m.id === 4 ? { ...m, balance: [{ currency_code: 'EUR', amount: '-10.00' }] } : m.id === 5 ? { ...m, balance: [{ currency_code: 'EUR', amount: '10.00' }] } : m,
     );
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'settle_plan', arguments: { group_id: 100 } });
+    const r = await client.callTool({ name: 'settle_plan', arguments: { group: 100 } });
     const text = String((r.content[0] as { text: string }).text);
     expect(text).toContain('Priya S pays you 61.00 EUR');
     expect(text).not.toContain('pays Vivek D');
@@ -675,7 +732,7 @@ describe('splittab server', () => {
       m.id === 4 ? { ...m, balance: [{ currency_code: 'EUR', amount: '-10.00' }] } : m.id === 5 ? { ...m, balance: [{ currency_code: 'EUR', amount: '10.00' }] } : m,
     );
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'settle_plan', arguments: { group_id: 100, everything: true } });
+    const r = await client.callTool({ name: 'settle_plan', arguments: { group: 100, everything: true } });
     const text = String((r.content[0] as { text: string }).text);
     expect(text).toContain('Alex Ahuja pays Alex Brown 10.00 EUR');
     expect(text).not.toContain('not listed');
@@ -692,7 +749,7 @@ describe('splittab server', () => {
 
   it('leaves a trail comment on an expense it creates', async () => {
     const { client, prompts } = await connect(state, true);
-    await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'coffee 10, I paid, split with me, Priya and Sam' } });
+    await client.callTool({ name: 'add_expense', arguments: { group: 100, text: 'coffee 10, I paid, split with me, Priya and Sam' } });
     expect(prompts[0]).toContain('It will carry a comment saying Added by Splittab MCP');
     const comment = state.comments.at(-1);
     expect(comment?.content).toContain('coffee, 10.00 EUR');
@@ -710,7 +767,7 @@ describe('splittab server', () => {
 
   it('signs a recorded payment too', async () => {
     const { client } = await connect(state, true);
-    await client.callTool({ name: 'settle_up', arguments: { friend: 'Priya', group_id: 100 } });
+    await client.callTool({ name: 'settle_up', arguments: { friend: 'Priya', group: 100 } });
     expect(state.comments.at(-1)?.content).toContain('Recorded a payment of 61.00 EUR');
   });
 
@@ -725,7 +782,7 @@ describe('splittab server', () => {
       },
       configurable: true,
     });
-    const r = await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'tea 5' } });
+    const r = await client.callTool({ name: 'add_expense', arguments: { group: 100, text: 'tea 5' } });
     expect((r.structuredContent as { posted: boolean }).posted).toBe(true);
   });
 

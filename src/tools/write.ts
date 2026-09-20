@@ -6,10 +6,10 @@ import { fromMinor, rescaleShares, splitEqual, toMinor } from '../domain/money.j
 import { parseExpenseSentence } from '../domain/parser.js';
 import type { Deps, PendingWrite } from '../server/deps.js';
 import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, timed, untrusted } from '../server/format.js';
-import { type Invitee, describeResolution, resolveInvitee, resolveMember } from '../server/resolve.js';
+import { type Invitee, describeGroupResolution, describeResolution, resolveGroup, resolveInvitee, resolveMember } from '../server/resolve.js';
 import type { SwAddUserToGroup, SwCreateExpenseByShares, SwCreateGroup, SwExpense, SwUser } from '../splitwise/types.js';
 import type { WriteRecord } from '../store/writeLog.js';
-import { AddExpenseOutput, AddMembersOutput, BoolArg, ConfirmSchema, GroupOutput, IntArg, ItemSplitOutput, ReceiptItemInput, SettleOutputWrite, UpdateExpenseOutput } from './schemas.js';
+import { AddExpenseOutput, AddMembersOutput, BoolArg, ConfirmSchema, GroupArg, GroupOutput, IntArg, ItemSplitOutput, ReceiptItemInput, SettleOutputWrite, UpdateExpenseOutput } from './schemas.js';
 
 const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } as const;
 
@@ -146,6 +146,19 @@ function localDate(now: Date): string {
   return now.toISOString().slice(0, 10);
 }
 
+
+/**
+ * Resolve a group argument, which may be a name or an id, to a numeric id.
+ *
+ * A failure returns the message rather than throwing, so every caller answers
+ * with the list of groups that do exist instead of a bare refusal.
+ */
+async function toGroupId(deps: Deps, ref: string | number): Promise<{ ok: true; id: number; name: string } | { ok: false; message: string }> {
+  const r = resolveGroup(await deps.groups(), ref);
+  if (!r.ok) return { ok: false, message: describeGroupResolution(ref, r) };
+  return { ok: true, id: r.group.id, name: r.group.name };
+}
+
 export function registerWriteTools(server: McpServer, deps: Deps): void {
   server.registerTool(
     'add_expense',
@@ -154,7 +167,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       description:
         'Add a shared expense to a group from a sentence ("dinner 84, I paid, split with everyone") or from explicit fields. Step 1 returns a preview naming everyone whose balance changes and asks for confirmation. Nothing is posted until the user confirms. Checks for likely duplicates first. Equal split only in this version; give participants to limit who shares it. Posts a comment on the expense noting that Splittab MCP created it, so the group can see where it came from.',
       inputSchema: z.object({
-        group_id: IntArg().describe('Group to post into. Call list_groups to find the id.'),
+        group: GroupArg().describe('Group name like "Deewani", or its numeric id. Call list_groups if you need to see them.'),
         text: z.string().max(300).optional().describe('A sentence like "taxi 16 paid by Sam split with me and Sam".'),
         description: z.string().max(120).optional().describe('Overrides the description parsed from text.'),
         cost: z.string().optional().describe('Decimal string like "84.00". Overrides text.'),
@@ -171,6 +184,9 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     timed(deps, 'add_expense', async (args, ctx) => {
       const denied = missingScope(ctx, 'add');
       if (denied) return denied;
+      const resolvedGroup = await toGroupId(deps, args.group);
+      if (!resolvedGroup.ok) return fail(resolvedGroup.message);
+      const groupId = resolvedGroup.id;
       const me = await deps.me();
       const pending = ctx.mcpReq.requestState<PendingWrite>();
 
@@ -181,7 +197,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         const answer = acceptedContent(ctx.mcpReq.inputResponses, 'confirm', ConfirmSchema);
         if (!answer || answer.confirm !== true || declined(ctx.mcpReq.inputResponses)) {
           deps.metrics.emit({ type: 'preview_declined', tool: 'add_expense' });
-          return ok('Cancelled. Nothing was posted.', { posted: false, group_id: args.group_id, note: 'Cancelled by the user.' });
+          return ok('Cancelled. Nothing was posted.', { posted: false, group_id: groupId, note: 'Cancelled by the user.' });
         }
         deps.metrics.emit({ type: 'preview_confirmed', tool: 'add_expense' });
         const guard = await withClaim(
@@ -202,18 +218,18 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
           return ok(`Already posted as expense #${guard.record.expenseId} ("${guard.record.description}"). Nothing new was created.`, {
             posted: false,
             expense_id: guard.record.expenseId,
-            group_id: args.group_id,
+            group_id: groupId,
             note: 'A matching expense was posted in the last 48 hours. Refused to post again.',
           });
         }
         if (guard.kind === 'in_flight') {
-          return ok('That expense is being posted right now by another request. Nothing new was created.', { posted: false, group_id: args.group_id, note: IN_FLIGHT_NOTE });
+          return ok('That expense is being posted right now by another request. Nothing new was created.', { posted: false, group_id: groupId, note: IN_FLIGHT_NOTE });
         }
         const created = guard.value;
-        return ok(`Posted "${payload.description}" ${payload.cost} ${payload.currency} as expense #${created.id}. ${GROUP_URL(args.group_id)}`, {
+        return ok(`Posted "${payload.description}" ${payload.cost} ${payload.currency} as expense #${created.id}. ${GROUP_URL(groupId)}`, {
           posted: true,
           expense_id: created.id,
-          group_id: args.group_id,
+          group_id: groupId,
           description: payload.description,
           cost: payload.cost,
           currency: payload.currency,
@@ -223,7 +239,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       }
 
       // Round 1: build the proposal.
-      const group = await deps.group(args.group_id);
+      const group = await deps.group(groupId);
       const parsed = args.text ? parseExpenseSentence(args.text, deps.now()) : null;
       const description = untrusted(args.description ?? parsed?.description ?? '', 120);
       const costText = args.cost ?? parsed?.cost;
@@ -631,7 +647,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       description:
         'Add one or more people to an existing Splitwise group. Name existing friends, or give an email address to invite someone new. Anyone already in the group is skipped. Shows a preview and waits for confirmation, because an email sends a real invitation and everyone added can see the whole group history. This connector cannot remove anyone; do that in the Splitwise app.',
       inputSchema: z.object({
-        group_id: IntArg(),
+        group: GroupArg(),
         members: z.array(z.string().max(120)).min(1).max(50).describe('Friend names, or email addresses to invite someone new.'),
       }),
       outputSchema: AddMembersOutput,
@@ -640,6 +656,9 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     timed(deps, 'add_to_group', async (args, ctx) => {
       const denied = missingScope(ctx, 'add');
       if (denied) return denied;
+      const resolvedGroup = await toGroupId(deps, args.group);
+      if (!resolvedGroup.ok) return fail(resolvedGroup.message);
+      const groupId = resolvedGroup.id;
       const me = await deps.me();
       const pending = ctx.mcpReq.requestState<PendingWrite>();
 
@@ -664,7 +683,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
           }
         }
         // Membership changed, so the cached group and group list are stale.
-        await deps.client.invalidateGroups(args.group_id);
+        await deps.client.invalidateGroups(groupId);
         const failed = results.filter((r) => r.status === 'failed');
         if (results.some((r) => r.status !== 'failed')) deps.metrics.emit({ type: 'write_posted', tool: 'add_to_group' });
         const summary = results.filter((r) => r.status !== 'failed').map((r) => r.name);
@@ -678,7 +697,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       }
 
       // Round 1.
-      const group = await deps.group(args.group_id);
+      const group = await deps.group(groupId);
       const friends = await deps.client.friends();
       const alreadyIn = new Set(group.members.map((m) => m.id));
       // Anyone who is both a friend and a member would otherwise appear twice
@@ -741,7 +760,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       description:
         'Split a bill line by line instead of equally, so everyone pays for what they ordered. Read the receipt yourself (from a photo, a PDF or text the user pasted) and pass the lines in as `items`, each with who shares it. Tax and tip are allocated in proportion to what each person ordered, not split equally. Pass `total` from the receipt and the tool will refuse to post if the lines do not add up, which catches a misread photo before it becomes five wrong balances. Shows a preview and waits for confirmation, and posts a comment noting that Splittab MCP created it.',
       inputSchema: z.object({
-        group_id: IntArg(),
+        group: GroupArg(),
         description: z.string().max(120).describe('What the bill was, e.g. "Dinner at Cervejaria".'),
         items: z.array(ReceiptItemInput).min(1).max(100),
         tax: z.string().optional().describe('Tax as printed. Allocated in proportion to each person\'s items.'),
@@ -759,6 +778,9 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     timed(deps, 'split_by_items', async (args, ctx) => {
       const denied = missingScope(ctx, 'add');
       if (denied) return denied;
+      const resolvedGroup = await toGroupId(deps, args.group);
+      if (!resolvedGroup.ok) return fail(resolvedGroup.message);
+      const groupId = resolvedGroup.id;
       const me = await deps.me();
       const pending = ctx.mcpReq.requestState<PendingWrite>();
 
@@ -768,7 +790,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         const answer = acceptedContent(ctx.mcpReq.inputResponses, 'confirm', ConfirmSchema);
         if (!answer || answer.confirm !== true || declined(ctx.mcpReq.inputResponses)) {
           deps.metrics.emit({ type: 'preview_declined', tool: 'split_by_items' });
-          return ok('Cancelled. Nothing was posted.', { posted: false, group_id: args.group_id, note: 'Cancelled by the user.' });
+          return ok('Cancelled. Nothing was posted.', { posted: false, group_id: groupId, note: 'Cancelled by the user.' });
         }
         deps.metrics.emit({ type: 'preview_confirmed', tool: 'split_by_items' });
         const guard = await withClaim(
@@ -789,18 +811,18 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
           return ok(`Already posted as expense #${guard.record.expenseId}. Nothing new was created.`, {
             posted: false,
             expense_id: guard.record.expenseId,
-            group_id: args.group_id,
+            group_id: groupId,
             note: 'A matching expense was posted in the last 48 hours. Refused to post again.',
           });
         }
         if (guard.kind === 'in_flight') {
-          return ok('That expense is being posted right now by another request. Nothing new was created.', { posted: false, group_id: args.group_id, note: IN_FLIGHT_NOTE });
+          return ok('That expense is being posted right now by another request. Nothing new was created.', { posted: false, group_id: groupId, note: IN_FLIGHT_NOTE });
         }
         const created = guard.value;
-        return ok(`Posted "${payload.description}" ${payload.total} ${payload.currency} as expense #${created.id}, split by item. ${GROUP_URL(args.group_id)}`, {
+        return ok(`Posted "${payload.description}" ${payload.total} ${payload.currency} as expense #${created.id}, split by item. ${GROUP_URL(groupId)}`, {
           posted: true,
           expense_id: created.id,
-          group_id: args.group_id,
+          group_id: groupId,
           total: payload.total,
           currency: payload.currency,
           breakdown: payload.breakdown,
@@ -809,7 +831,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       }
 
       // Round 1.
-      const group = await deps.group(args.group_id);
+      const group = await deps.group(groupId);
       const currency = (args.currency ?? me.default_currency ?? 'USD').toUpperCase();
       const description = untrusted(args.description, 120);
       const date = args.date ?? localDate(deps.now());
@@ -934,7 +956,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         amount: z.string().optional().describe('Decimal string like "61.00". Defaults to the full outstanding balance with this person.'),
         currency: z.string().length(3).optional(),
         direction: z.enum(['i_paid', 'they_paid']).default('i_paid').describe('Who handed over the money.'),
-        group_id: IntArg().optional().describe('Record it inside a group. Otherwise it is a direct payment.'),
+        group: GroupArg().optional().describe('Record it inside a group, by name or id. Otherwise it is a direct payment.'),
         date: z.string().optional().describe('YYYY-MM-DD. Defaults to today.'),
         idempotency_key: z.string().max(64).optional(),
       }),
@@ -944,6 +966,12 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     timed(deps, 'settle_up', async (args, ctx) => {
       const denied = missingScope(ctx, 'add');
       if (denied) return denied;
+      let groupId: number | undefined;
+      if (args.group !== undefined) {
+        const resolvedGroup = await toGroupId(deps, args.group);
+        if (!resolvedGroup.ok) return fail(resolvedGroup.message);
+        groupId = resolvedGroup.id;
+      }
       const me = await deps.me();
       const pending = ctx.mcpReq.requestState<PendingWrite>();
 
@@ -998,12 +1026,12 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       let currency = (args.currency ?? me.default_currency ?? 'USD').toUpperCase();
       const friends = await deps.client.friends();
 
-      if (args.group_id !== undefined) {
-        const group = await deps.group(args.group_id);
+      if (groupId !== undefined) {
+        const group = await deps.group(groupId);
         const r = resolveMember(group, args.friend, me.id);
         if (!r.ok) return fail(describeResolution(args.friend, r));
         target = r.user;
-        const bal = friends.find((f) => f.id === target.id)?.groups.find((g) => g.group_id === args.group_id)?.balance ?? [];
+        const bal = friends.find((f) => f.id === target.id)?.groups.find((g) => g.group_id === groupId)?.balance ?? [];
         const picked = bal.find((b) => (args.currency ? b.currency_code === currency : toMinor(b.amount) !== 0));
         if (picked) {
           outstanding = toMinor(picked.amount);
@@ -1044,7 +1072,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       const body: SwCreateExpenseByShares = {
         cost: fromMinor(amountMinor),
         description: 'Payment',
-        group_id: args.group_id ?? 0,
+        group_id: groupId ?? 0,
         currency_code: currency,
         date: `${date}T12:00:00Z`,
         // `payment` is not in the documented create_expense schema, but the
@@ -1059,7 +1087,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         users__1__owed_share: fromMinor(amountMinor),
       };
 
-      const fp = `settle|${args.group_id ?? 0}|${payer.id}|${receiver.id}|${currency}|${amountMinor}|${date}`;
+      const fp = `settle|${groupId ?? 0}|${payer.id}|${receiver.id}|${currency}|${amountMinor}|${date}`;
       const already = await deps.writeLog.find(String(me.id), fp, args.idempotency_key);
       if (already) {
         deps.metrics.emit({ type: 'duplicate_blocked', tool: 'settle_up', source: 'write_log' });

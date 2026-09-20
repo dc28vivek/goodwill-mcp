@@ -1,4 +1,4 @@
-import type { SwUser } from '../splitwise/types.js';
+import type { SwGroup, SwUser } from '../splitwise/types.js';
 import { fullName } from './format.js';
 
 export type Resolved =
@@ -40,6 +40,68 @@ export function describeResolution(ref: string | number, r: Resolved): string {
     return `"${ref}" matches ${r.candidates.length} people: ${r.candidates.map((c) => `${fullName(c)} (id ${c.id})`).join(', ')}. Say which one, or use the id.`;
   }
   return `"${ref}" is not a member of this group. Use a member's name or id.`;
+}
+
+export type ResolvedGroup =
+  | { ok: true; group: SwGroup }
+  | { ok: false; reason: 'ambiguous'; candidates: SwGroup[] }
+  | { ok: false; reason: 'not_found'; candidates: SwGroup[] };
+
+/** Group 0 is Splitwise's bucket for non-group expenses, never a real group. */
+const realGroups = (groups: SwGroup[]) => groups.filter((g) => g.id !== 0);
+
+const groupName = (g: SwGroup) => (g.name ?? '').trim().toLowerCase();
+
+/**
+ * Turn "Deewani", "deewani", "lisbon" or a numeric id into a group.
+ *
+ * Every group-taking tool used to demand a numeric id. People do not know
+ * their group ids and have no reason to: they say "Deewani". Tools already
+ * took a person by name, so taking a group by name is the same idea finished.
+ * Ids still work, because the model may well have one from list_groups.
+ * See ADR-0019.
+ */
+export function resolveGroup(groups: SwGroup[], ref: string | number): ResolvedGroup {
+  const real = realGroups(groups);
+  // An id wins when one matches. When none does, a digits-only reference is
+  // not necessarily an id: "2027" is a perfectly good way to mean "Lisbon
+  // 2027", so it falls through to name matching rather than failing.
+  if (typeof ref === 'number' || /^\d+$/.test(String(ref).trim())) {
+    const group = real.find((g) => g.id === Number(ref));
+    if (group) return { ok: true, group };
+    if (typeof ref === 'number') return { ok: false, reason: 'not_found', candidates: real };
+  }
+  const q = String(ref).trim().toLowerCase();
+
+  const exact = real.filter((g) => groupName(g) === q);
+  if (exact.length === 1) return { ok: true, group: exact[0]! };
+  if (exact.length > 1) return { ok: false, reason: 'ambiguous', candidates: exact };
+
+  const prefix = real.filter((g) => groupName(g).startsWith(q));
+  if (prefix.length === 1) return { ok: true, group: prefix[0]! };
+  if (prefix.length > 1) return { ok: false, reason: 'ambiguous', candidates: prefix };
+
+  const contains = real.filter((g) => groupName(g).includes(q));
+  if (contains.length === 1) return { ok: true, group: contains[0]! };
+  if (contains.length > 1) return { ok: false, reason: 'ambiguous', candidates: contains };
+
+  return { ok: false, reason: 'not_found', candidates: real };
+}
+
+/** Name the group, or list the real options rather than only refusing. */
+export function describeGroupResolution(ref: string | number, r: ResolvedGroup): string {
+  if (r.ok) return r.group.name;
+  const listed = r.candidates
+    .slice(0, 12)
+    .map((g) => `${g.name} (id ${g.id})`)
+    .join(', ');
+  const more = r.candidates.length > 12 ? `, and ${r.candidates.length - 12} more` : '';
+  if (r.reason === 'ambiguous') {
+    return `"${ref}" matches ${r.candidates.length} groups: ${listed}${more}. Say which one, or use the id.`;
+  }
+  return r.candidates.length
+    ? `There is no group called "${ref}". Your groups are: ${listed}${more}.`
+    : `There is no group called "${ref}", and you are not in any groups.`;
 }
 
 /** Someone named for a new or existing group. */

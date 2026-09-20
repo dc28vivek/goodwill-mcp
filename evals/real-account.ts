@@ -97,20 +97,20 @@ async function main() {
   }
   if (target) {
     console.log(`\n--- drilling into "${target.name}" (id ${target.id}) ---`);
-    await run(`explain_balance (whole group)`, 'explain_balance', { group_id: target.id });
-    await run(`settle_plan`, 'settle_plan', { group_id: target.id });
-    await run(`find_duplicates (365 days)`, 'find_duplicates', { group_id: target.id, since_days: 365 });
-    await run(`list_expenses (90 days)`, 'list_expenses', { group_id: target.id });
+    await run(`explain_balance (whole group)`, 'explain_balance', { group: target.id });
+    await run(`settle_plan`, 'settle_plan', { group: target.id });
+    await run(`find_duplicates (365 days)`, 'find_duplicates', { group: target.id, since_days: 365 });
+    await run(`list_expenses (90 days)`, 'list_expenses', { group: target.id });
     const other = target.members.find((m) => m.id !== me.id);
     if (other) {
-      await run(`explain_balance (one person)`, 'explain_balance', { group_id: target.id, friend: String(other.id) });
-      await run(`explain_balance (since last payment)`, 'explain_balance', { group_id: target.id, friend: String(other.id), since: 'last_payment' });
+      await run(`explain_balance (one person)`, 'explain_balance', { group: target.id, friend: String(other.id) });
+      await run(`explain_balance (since last payment)`, 'explain_balance', { group: target.id, friend: String(other.id), since: 'last_payment' });
     }
     // Read one real expense in full, whichever the listing surfaced first.
     const recent = (await deps.client.allExpenses({ group_id: target.id }, 20)).find((e) => !e.deleted_at);
     if (recent) await run(`read_expense (#${recent.id})`, 'read_expense', { expense_id: recent.id });
     await run('find_missing_expenses (invented charge)', 'find_missing_expenses', {
-      group_id: target.id,
+      group: target.id,
       currency: me.default_currency ?? 'USD',
       transactions: [{ date: new Date().toISOString().slice(0, 10), amount: '13.37', description: 'A CHARGE THAT DOES NOT EXIST' }],
     });

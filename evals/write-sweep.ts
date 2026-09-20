@@ -63,18 +63,18 @@ async function main() {
   }
 
   // 2. add_expense.
-  const added = await call('add_expense', { group_id: groupId, text: 'Sandbox coffee 4.20', idempotency_key: `sweep-${stamp}-1` });
+  const added = await call('add_expense', { group: groupId, text: 'Sandbox coffee 4.20', idempotency_key: `sweep-${stamp}-1` });
   const expenseId = Number(added.sc?.expense_id);
   check('add_expense', added.sc?.posted === true, `expense ${expenseId}, ${String(added.sc?.cost)}`);
   check('  preview named the split and the signature', /Split:/.test(added.prompt) && /Added by Splittab MCP/.test(added.prompt));
 
   // 3. the same expense again: the write log should refuse it.
-  const dupe = await call('add_expense', { group_id: groupId, text: 'Sandbox coffee 4.20' });
+  const dupe = await call('add_expense', { group: groupId, text: 'Sandbox coffee 4.20' });
   check('add_expense refuses a duplicate', dupe.sc?.posted === false, String(dupe.sc?.note ?? '').slice(0, 60));
 
   // 4. a declined write posts nothing.
   answer = 'decline';
-  const declined = await call('add_expense', { group_id: groupId, text: 'Should never exist 99' });
+  const declined = await call('add_expense', { group: groupId, text: 'Should never exist 99' });
   check('declining posts nothing', declined.sc?.posted === false);
   answer = 'accept';
 
@@ -91,7 +91,7 @@ async function main() {
 
   // 7. split_by_items with a deliberately wrong total.
   const bad = await call('split_by_items', {
-    group_id: groupId,
+    group: groupId,
     description: 'Sandbox receipt',
     currency: String(me.default_currency ?? 'USD'),
     items: [{ description: 'Thing', amount: '10.00', shared_by: ['me'] }],
@@ -102,7 +102,7 @@ async function main() {
 
   // 8. split_by_items that does add up.
   const good = await call('split_by_items', {
-    group_id: groupId,
+    group: groupId,
     description: 'Sandbox receipt',
     currency: String(me.default_currency ?? 'USD'),
     items: [{ description: 'Thing', amount: '10.00', shared_by: ['me'] }],
@@ -112,7 +112,7 @@ async function main() {
   check('split_by_items posts a valid receipt', good.sc?.posted === true, String(good.sc?.total ?? ''));
 
   // 9. the writes are visible to the read tools.
-  const listed = await call('list_expenses', { group_id: groupId, since: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10) });
+  const listed = await call('list_expenses', { group: groupId, since: new Date(Date.now() - 86_400_000).toISOString().slice(0, 10) });
   check('writes are visible to list_expenses', Number(listed.sc?.returned) >= 2, `${String(listed.sc?.returned)} expenses`);
 
   await client.close();

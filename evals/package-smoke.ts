@@ -66,7 +66,7 @@ async function main() {
     const { tools } = await client.listTools();
     checks.push(['sixteen tools listed', tools.length === 16, tools.map((t) => t.name).join(', ')]);
 
-    const res = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Priya' } });
+    const res = await client.callTool({ name: 'explain_balance', arguments: { group: 100, friend: 'Priya' } });
     const b = (res.structuredContent as { balances?: { charged?: string; remaining?: string }[] })?.balances?.[0];
     checks.push(['explain_balance returns a statement', b?.charged === '61.00' && b?.remaining === '61.00', `charged=${b?.charged} remaining=${b?.remaining}`]);
 
@@ -74,7 +74,7 @@ async function main() {
     const text = resource.contents[0] && 'text' in resource.contents[0] ? String(resource.contents[0].text) : '';
     checks.push(['groups resource served', text.includes('Lisbon'), `${text.slice(0, 40)}...`]);
 
-    const write = await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'coffee 10' } });
+    const write = await client.callTool({ name: 'add_expense', arguments: { group: 100, text: 'coffee 10' } });
     checks.push(['declined write posts nothing', (write.structuredContent as { posted?: boolean })?.posted === false, 'confirmation declined']);
 
     await client.close();

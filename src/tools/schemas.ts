@@ -26,6 +26,14 @@ export const BoolArg = () =>
     return t === 'true' ? true : t === 'false' ? false : v;
   }, z.boolean());
 
+/**
+ * A group, named the way a person would name it.
+ *
+ * Accepts "Deewani" or 12345. Descriptions say so, because a model given only
+ * a type will send whichever it happens to have.
+ */
+export const GroupArg = () => z.union([z.string().min(1), z.number().int()]);
+
 export const Money = z.string().describe('Decimal amount as a string, two places, e.g. "84.00"');
 
 export const Person = z.object({ id: z.number(), name: z.string() });
@@ -37,6 +45,7 @@ export const Contribution = z.object({
   amount: Money.describe('Positive: they owe you from this item. Negative: you owe them.'),
   total: Money.describe('What the whole expense cost, before splitting.'),
   share_percent: z.number().nullable().describe('The share as a percentage of the total. Null for payments.'),
+  group: z.string().nullable().describe('Group this belongs to, or null for a direct expense between the two of you.'),
   kind: z.enum(['expense', 'payment']),
 });
 
@@ -57,6 +66,7 @@ export const ExplainOutput = z.object({
       since: z.enum(['last_settled', 'last_payment', 'all', 'date']).describe('Which rule chose the window.'),
       opens_after: z.string().nullable().describe('Date the window opens after. Everything on or before it is summarised as brought_forward.'),
       closed_count: z.number().describe('How many earlier items were left out.'),
+      spans_groups: z.array(z.string()).describe('Groups this balance is spread across. Empty when it is all direct.'),
       contributions: z.array(Contribution),
     }),
   ),
