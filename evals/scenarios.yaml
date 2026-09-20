@@ -263,6 +263,33 @@
     prompt_includes: ["Skipping, already in the group: Priya S", "whole expense history"]
     writes.add_user_to_group: 1
 
+- id: correct-amount
+  prompt: "That dinner was actually 90, not 84"
+  tool: update_expense
+  args: { expense_id: 1001, cost: "90.00" }
+  answer: accept
+  expect:
+    structured.updated: true
+    prompt_includes: ["which everyone on it can already see", "cost: 84.00 -> 90.00", "Priya S: 28.00 -> 30.00"]
+    writes.update_expense: 1
+
+- id: correct-declined
+  prompt: "Change the dinner to 90 (then say no)"
+  tool: update_expense
+  args: { expense_id: 1001, cost: "90.00" }
+  answer: decline
+  expect:
+    structured.updated: false
+    writes.update_expense: 0
+
+- id: correct-nothing-to-do
+  prompt: "Set the dinner to 84, which it already is"
+  tool: update_expense
+  args: { expense_id: 1001, cost: "84.00" }
+  expect:
+    structured.updated: false
+    writes.update_expense: 0
+
 - id: settle-full
   prompt: "Priya paid me back for Lisbon, record it"
   tool: settle_up

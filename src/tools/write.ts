@@ -2,13 +2,13 @@ import { type McpServer, acceptedContent, inputRequired, inputResponse } from '@
 import * as z from 'zod/v4';
 import { type ExpenseLike, findDuplicates, fingerprint, toExpenseLike } from '../domain/dedupe.js';
 import { ReceiptMismatch, splitByItems } from '../domain/items.js';
-import { fromMinor, splitEqual, toMinor } from '../domain/money.js';
+import { fromMinor, rescaleShares, splitEqual, toMinor } from '../domain/money.js';
 import { parseExpenseSentence } from '../domain/parser.js';
 import type { Deps, PendingWrite } from '../server/deps.js';
 import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, timed, untrusted } from '../server/format.js';
 import { type Invitee, describeResolution, resolveInvitee, resolveMember } from '../server/resolve.js';
 import type { SwAddUserToGroup, SwCreateExpenseByShares, SwCreateGroup, SwExpense, SwUser } from '../splitwise/types.js';
-import { AddExpenseOutput, AddMembersOutput, ConfirmSchema, GroupOutput, ItemSplitOutput, NudgeOutput, ReceiptItemInput, SettleOutputWrite } from './schemas.js';
+import { AddExpenseOutput, AddMembersOutput, ConfirmSchema, GroupOutput, ItemSplitOutput, NudgeOutput, ReceiptItemInput, SettleOutputWrite, UpdateExpenseOutput } from './schemas.js';
 
 const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } as const;
 
@@ -25,6 +25,14 @@ interface NudgePayload {
   expenseId: number;
   content: string;
   toName: string;
+}
+
+interface UpdatePayload {
+  expenseId: number;
+  body: Partial<SwCreateExpenseByShares>;
+  changes: { field: string; from: string; to: string }[];
+  balanceChanges: { person: { id: number; name: string }; from: string; to: string }[];
+  description: string;
 }
 
 interface GroupPayload {
@@ -237,6 +245,162 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         inputRequests: {
           confirm: inputRequired.elicit({ message: `${preview} Post it?`, requestedSchema: ConfirmSchema }),
         },
+        requestState: state,
+      });
+    }),
+  );
+
+  server.registerTool(
+    'update_expense',
+    {
+      title: 'Correct an expense',
+      description:
+        'Fix an expense that is already in Splitwise: a wrong amount, a typo in the description, the wrong date or category. Other people have already seen it, so the preview shows the current values next to the new ones and what each person\'s share becomes. Changing the cost keeps the split everyone agreed to, rescaled in proportion. This cannot add or remove people, change who paid, or turn an expense into a payment; do those in the Splitwise app.',
+      inputSchema: z.object({
+        expense_id: z.number().int().describe('From list_expenses or read_expense.'),
+        description: z.string().max(120).optional(),
+        cost: z.string().optional().describe('Decimal string. Shares are rescaled in proportion.'),
+        date: z.string().optional().describe('YYYY-MM-DD.'),
+        category_id: z.number().int().optional(),
+        notes: z.string().max(300).optional(),
+        idempotency_key: z.string().max(64).optional(),
+      }),
+      outputSchema: UpdateExpenseOutput,
+      annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
+    },
+    timed(deps.metrics, 'update_expense', async (args, ctx) => {
+      const denied = missingScope(ctx, 'modify');
+      if (denied) return denied;
+      const me = await deps.me();
+      const pending = ctx.mcpReq.requestState<PendingWrite>();
+
+      if (pending && pending.kind === 'update_expense') {
+        if (pending.userId !== me.id) return fail('This confirmation belongs to a different Splitwise account. Start again.');
+        const payload = pending.payload as UpdatePayload;
+        const answer = acceptedContent(ctx.mcpReq.inputResponses, 'confirm', ConfirmSchema);
+        if (!answer || answer.confirm !== true || declined(ctx.mcpReq.inputResponses)) {
+          deps.metrics.emit({ type: 'preview_declined', tool: 'update_expense' });
+          return ok('Cancelled. The expense is unchanged.', { updated: false, expense_id: payload.expenseId, note: 'Cancelled by the user.' });
+        }
+        deps.metrics.emit({ type: 'preview_confirmed', tool: 'update_expense' });
+        const existing = await deps.writeLog.find(String(me.id), pending.fingerprint, pending.idempotencyKey);
+        if (existing) {
+          deps.metrics.emit({ type: 'duplicate_blocked', tool: 'update_expense', source: 'write_log' });
+          return ok(`That correction was already applied to #${payload.expenseId}. Nothing was changed again.`, {
+            updated: false,
+            expense_id: payload.expenseId,
+            note: 'The same correction was applied in the last 48 hours. Refused to repeat it.',
+          });
+        }
+        await deps.client.updateExpense(payload.expenseId, payload.body);
+        deps.metrics.emit({ type: 'write_posted', tool: 'update_expense' });
+        await deps.writeLog.record(String(me.id), {
+          fingerprint: pending.fingerprint,
+          ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
+          expenseId: payload.expenseId,
+          createdAt: deps.now().toISOString(),
+          description: payload.description,
+        });
+        return ok(
+          [`Updated #${payload.expenseId} "${payload.description}".`, ...payload.changes.map((c) => `  ${c.field}: ${c.from} -> ${c.to}`)].join('\n'),
+          { updated: true, expense_id: payload.expenseId, changes: payload.changes, balance_changes: payload.balanceChanges, note: 'Updated. Everyone on the expense sees the new values.' },
+        );
+      }
+
+      // Round 1: read the current state. Refuse rather than guess.
+      if (args.description === undefined && args.cost === undefined && args.date === undefined && args.category_id === undefined && args.notes === undefined) {
+        return fail('Nothing to change. Give at least one of description, cost, date, category_id or notes.');
+      }
+      let current;
+      try {
+        current = await deps.client.expense(args.expense_id);
+      } catch {
+        return fail(`No expense #${args.expense_id}, or you cannot see it. Use list_expenses to find the right id.`);
+      }
+      if (current.deleted_at) return fail(`Expense #${args.expense_id} was deleted. Restore it in the Splitwise app first.`);
+      if (current.payment) return fail(`#${args.expense_id} is a settle-up payment, not an expense. This tool does not change payments.`);
+
+      const body: Partial<SwCreateExpenseByShares> = {};
+      const changes: UpdatePayload['changes'] = [];
+      const oldDescription = untrusted(current.description, 120);
+
+      if (args.description !== undefined && untrusted(args.description, 120) !== oldDescription) {
+        body.description = untrusted(args.description, 120);
+        changes.push({ field: 'description', from: oldDescription, to: body.description });
+      }
+      if (args.date !== undefined && args.date !== current.date.slice(0, 10)) {
+        body.date = `${args.date}T12:00:00Z`;
+        changes.push({ field: 'date', from: current.date.slice(0, 10), to: args.date });
+      }
+      if (args.category_id !== undefined && args.category_id !== current.category?.id) {
+        body.category_id = args.category_id;
+        changes.push({ field: 'category', from: untrusted(current.category?.name ?? 'none', 40), to: `id ${args.category_id}` });
+      }
+      if (args.notes !== undefined && args.notes !== (current.details ?? '')) {
+        body.details = untrusted(args.notes, 300);
+        changes.push({ field: 'notes', from: untrusted(current.details ?? '(none)', 60), to: untrusted(args.notes, 60) });
+      }
+
+      const balanceChanges: UpdatePayload['balanceChanges'] = [];
+      if (args.cost !== undefined) {
+        let newCost: number;
+        try {
+          newCost = toMinor(args.cost);
+        } catch {
+          return fail(`"${args.cost}" is not an amount. Use a decimal like "90.00".`);
+        }
+        if (newCost <= 0) return fail('The cost must be greater than zero.');
+        const oldCost = toMinor(current.cost);
+        if (newCost !== oldCost) {
+          changes.push({ field: 'cost', from: fromMinor(oldCost), to: fromMinor(newCost) });
+          body.cost = fromMinor(newCost);
+          // Supplying any share field overwrites all of them, so every share is
+          // rebuilt, rescaled by the proportion each person already had.
+          const owed = new Map(current.users.map((u) => [u.user_id, toMinor(u.owed_share)]));
+          const paid = new Map(current.users.map((u) => [u.user_id, toMinor(u.paid_share)]));
+          const newOwed = rescaleShares(owed, newCost);
+          const newPaid = rescaleShares(paid, newCost);
+          let i = 0;
+          for (const u of current.users) {
+            const to = newOwed.get(u.user_id) ?? 0;
+            body[`users__${i}__user_id`] = u.user_id;
+            body[`users__${i}__paid_share`] = fromMinor(newPaid.get(u.user_id) ?? 0);
+            body[`users__${i}__owed_share`] = fromMinor(to);
+            const from = owed.get(u.user_id) ?? 0;
+            if (from !== to) balanceChanges.push({ person: { id: u.user_id, name: fullName(u.user) }, from: fromMinor(from), to: fromMinor(to) });
+            i += 1;
+          }
+        }
+      }
+
+      if (changes.length === 0) return ok('Nothing to change; the expense already has those values.', { updated: false, expense_id: args.expense_id, note: 'No difference between the current and requested values.' });
+
+      const fp = `update|${args.expense_id}|${changes.map((c) => `${c.field}=${c.to}`).sort().join(',')}`;
+      const already = await deps.writeLog.find(String(me.id), fp, args.idempotency_key);
+      if (already) {
+        deps.metrics.emit({ type: 'duplicate_blocked', tool: 'update_expense', source: 'write_log' });
+        return ok(`That correction was already applied to #${args.expense_id} within the last 48 hours.`, { updated: false, expense_id: args.expense_id, note: 'Duplicate correction. Refused.' });
+      }
+
+      const others = balanceChanges.filter((b) => b.person.id !== me.id);
+      const preview = [
+        `Change expense #${args.expense_id} "${oldDescription}", which everyone on it can already see:`,
+        ...changes.map((c) => `  ${c.field}: ${c.from} -> ${c.to}`),
+        ...(balanceChanges.length ? ['', 'Shares become:', ...balanceChanges.map((b) => `  ${b.person.name}: ${b.from} -> ${b.to}`)] : []),
+        ...(others.length ? ['', `This changes what ${joinNames(others.map((b) => b.person.name))} owe.`] : []),
+      ].join('\n');
+
+      deps.metrics.emit({ type: 'preview_shown', tool: 'update_expense' });
+      const payload: UpdatePayload = { expenseId: args.expense_id, body, changes, balanceChanges, description: body.description ?? oldDescription };
+      const state = await deps.codec.mint({
+        kind: 'update_expense',
+        userId: me.id,
+        fingerprint: fp,
+        ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
+        payload,
+      });
+      return inputRequired({
+        inputRequests: { confirm: inputRequired.elicit({ message: `${preview}\n\nApply it?`, requestedSchema: ConfirmSchema }) },
         requestState: state,
       });
     }),

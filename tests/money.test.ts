@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fromMinor, sharesBalance, splitByWeights, splitEqual, toMinor } from '../src/domain/money.js';
+import { fromMinor, rescaleShares, sharesBalance, splitByWeights, splitEqual, toMinor } from '../src/domain/money.js';
 
 describe('toMinor / fromMinor', () => {
   it('parses Splitwise decimal strings', () => {
@@ -49,5 +49,28 @@ describe('splitByWeights', () => {
     const { shares } = splitByWeights(1000, new Map([[1, 1], [2, 0]]));
     expect(shares.has(2)).toBe(false);
     expect(shares.get(1)).toBe(1000);
+  });
+});
+
+describe('rescaleShares', () => {
+  it('keeps each person\'s proportion when the cost is corrected', () => {
+    const shares = new Map([[1, 2800], [2, 2800], [3, 2800]]);
+    const scaled = rescaleShares(shares, 9000);
+    expect([...scaled.values()]).toEqual([3000, 3000, 3000]);
+  });
+  it('preserves an uneven split', () => {
+    const shares = new Map([[1, 6000], [2, 2000], [3, 2000]]);
+    const scaled = rescaleShares(shares, 5000);
+    expect(scaled.get(1)).toBe(3000);
+    expect(scaled.get(2)).toBe(1000);
+  });
+  it('always sums exactly to the new total', () => {
+    const shares = new Map([[1, 1333], [2, 777], [3, 2111]]);
+    const scaled = rescaleShares(shares, 10001);
+    expect([...scaled.values()].reduce((a, b) => a + b, 0)).toBe(10001);
+  });
+  it('falls back to an equal split when there is nothing to scale from', () => {
+    const scaled = rescaleShares(new Map([[1, 0], [2, 0]]), 1000);
+    expect([...scaled.values()]).toEqual([500, 500]);
   });
 });

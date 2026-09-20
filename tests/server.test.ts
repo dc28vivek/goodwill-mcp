@@ -32,7 +32,7 @@ describe('goodwill server', () => {
   it('lists six tools with honest annotations and fixed order', async () => {
     const { client } = await connect(state);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'list_expenses', 'read_expense', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up', 'nudge']);
+    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'list_expenses', 'read_expense', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'update_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up', 'nudge']);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.explain_balance?.annotations?.readOnlyHint).toBe(true);
     expect(byName.add_expense?.annotations?.readOnlyHint).toBe(false);
@@ -462,5 +462,63 @@ describe('goodwill server', () => {
     const r = await client.callTool({ name: 'read_expense', arguments: { expense_id: 999999 } });
     expect(r.isError).toBe(true);
     expect((r.content[0] as { text: string }).text).toContain('Use list_expenses');
+  });
+
+  it('corrects an amount, rescaling shares and showing before and after', async () => {
+    const { client, prompts } = await connect(state, true);
+    const dinner = state.expenses.find((e) => e.description.startsWith('Dinner'))!;
+    const r = await client.callTool({ name: 'update_expense', arguments: { expense_id: dinner.id, cost: '90.00' } });
+    expect(prompts[0]).toContain('which everyone on it can already see');
+    expect(prompts[0]).toContain('cost: 84.00 -> 90.00');
+    expect(prompts[0]).toContain('Priya S: 28.00 -> 30.00');
+    expect(prompts[0]).toContain('This changes what Priya S and Sam K owe');
+    const sc = r.structuredContent as { updated: boolean; balance_changes: { to: string }[] };
+    expect(sc.updated).toBe(true);
+    const body = state.writes.find((w) => w.path === '/update_expense')?.body as Record<string, string | number>;
+    expect(body.cost).toBe('90.00');
+    const owed = [0, 1, 2].map((i) => Number(body[`users__${i}__owed_share`]));
+    expect(owed.reduce((a, b) => a + b, 0)).toBeCloseTo(90, 2);
+  });
+
+  it('fixes a typo without touching any share', async () => {
+    const { client, prompts } = await connect(state, true);
+    const dinner = state.expenses.find((e) => e.description.startsWith('Dinner'))!;
+    await client.callTool({ name: 'update_expense', arguments: { expense_id: dinner.id, description: 'Dinner at Cervejaria Ramiro' } });
+    expect(prompts[0]).toContain('description: Dinner at Cervejaria -> Dinner at Cervejaria Ramiro');
+    expect(prompts[0]).not.toContain('Shares become');
+    const body = state.writes.find((w) => w.path === '/update_expense')?.body as Record<string, unknown>;
+    expect(body.users__0__user_id).toBeUndefined();
+  });
+
+  it('does nothing when the values already match', async () => {
+    const { client } = await connect(state, true);
+    const dinner = state.expenses.find((e) => e.description.startsWith('Dinner'))!;
+    const r = await client.callTool({ name: 'update_expense', arguments: { expense_id: dinner.id, cost: '84.00' } });
+    expect((r.structuredContent as { updated: boolean }).updated).toBe(false);
+    expect(state.writes).toHaveLength(0);
+  });
+
+  it('refuses to change a settle-up payment', async () => {
+    const { client } = await connect(state, true);
+    const payment = state.expenses.find((e) => e.payment)!;
+    const r = await client.callTool({ name: 'update_expense', arguments: { expense_id: payment.id, cost: '10.00' } });
+    expect(r.isError).toBe(true);
+    expect((r.content[0] as { text: string }).text).toContain('not an expense');
+  });
+
+  it('refuses an empty change', async () => {
+    const { client } = await connect(state, true);
+    const r = await client.callTool({ name: 'update_expense', arguments: { expense_id: 1001 } });
+    expect(r.isError).toBe(true);
+    expect((r.content[0] as { text: string }).text).toContain('Nothing to change');
+  });
+
+  it('does not apply the same correction twice', async () => {
+    const { client } = await connect(state, true);
+    const dinner = state.expenses.find((e) => e.description.startsWith('Dinner'))!;
+    await client.callTool({ name: 'update_expense', arguments: { expense_id: dinner.id, cost: '90.00' } });
+    const again = await client.callTool({ name: 'update_expense', arguments: { expense_id: dinner.id, cost: '90.00' } });
+    expect((again.structuredContent as { updated: boolean }).updated).toBe(false);
+    expect(state.writes.filter((w) => w.path === '/update_expense')).toHaveLength(1);
   });
 });

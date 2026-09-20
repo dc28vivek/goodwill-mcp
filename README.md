@@ -45,10 +45,11 @@ Your key stays on your machine. Nothing is sent anywhere except Splitwise's own 
 - *"Add dinner 84, I paid, split with everyone"* — shows the split and who it affects, then waits
 - *"Here's a photo of the bill — I had the steak, Priya had the salad"* — splits by item, tax and tip in proportion
 - *"Create a Goa Trip group with Priya and Sam"* — then add expenses to it
+- *"That dinner was actually 90, not 84"* — shows before and after, and what each share becomes
 - *"Priya paid me back, record it"* — closes the balance
 - *"Remind Sam, gently"* — drafts a comment in the tone you pick, then waits
 
-Fourteen tools, three resources, one prompt:
+Fifteen tools, three resources, one prompt:
 
 | Tool | What it does | Writes? |
 |---|---|---|
@@ -63,6 +64,7 @@ Fourteen tools, three resources, one prompt:
 | `create_group` | A new group, with friends added and strangers invited by email | after confirmation |
 | `add_to_group` | People added to an existing group | after confirmation |
 | `add_expense` | A sentence or fields, a preview, then a confirmed post | after confirmation |
+| `update_expense` | Corrects an amount, description, date or category, rescaling shares | after confirmation |
 | `split_by_items` | A receipt split line by line, tax and tip allocated proportionally | after confirmation |
 | `settle_up` | Records a payment that already happened, closing the balance | after confirmation |
 | `nudge` | A drafted reminder, posted as a comment | after confirmation |
@@ -79,6 +81,7 @@ Every expense you add changes what other people owe. So:
 
 - **Every write previews and waits.** The tool returns the split, names the people whose balances change, and posts only after you confirm. This uses the MCP 2026-07-28 multi round-trip pattern, so the confirmation is a real protocol step, not a prompt the model can talk itself out of.
 - **No deletes.** There is no tool that removes an expense, a group, or a member. If a duplicate should go, you remove it in the Splitwise app.
+- **Corrections show what they overwrite.** `update_expense` is the only tool that changes something people have already seen, so its preview puts the current values next to the new ones and spells out what each person's share becomes. On the hosted server it needs a `modify` scope that is not granted by default.
 - **No double posts.** A write log keyed by group, amount, day, payer and normalised description refuses to post the same expense twice within 48 hours, across retries and across devices.
 - **Text from your group is data, not instructions.** Descriptions and comments are written by other members and could contain anything. The server labels them as data and no tool can redirect where a request goes.
 

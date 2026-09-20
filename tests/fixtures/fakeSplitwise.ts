@@ -113,6 +113,29 @@ export function fakeFetch(state: FakeState): typeof fetch {
       state.expenses.push(created);
       return json({ expenses: [created], errors: {} });
     }
+    if (path.startsWith('/update_expense/')) {
+      state.writes.push({ path: '/update_expense', body });
+      const id = Number(path.split('/').pop());
+      const found = state.expenses.find((e) => e.id === id);
+      if (!found) return json({ errors: { base: ['record not found'] } }, 404);
+      if (body.description !== undefined) found.description = String(body.description);
+      if (body.cost !== undefined) found.cost = String(body.cost);
+      if (body.date !== undefined) found.date = String(body.date);
+      if (body.details !== undefined) found.details = String(body.details);
+      if (body.users__0__user_id !== undefined) {
+        const users: SwExpense['users'] = [];
+        for (let i = 0; ; i += 1) {
+          const uid = body[`users__${i}__user_id`];
+          if (uid === undefined) break;
+          const paid = String(body[`users__${i}__paid_share`]);
+          const owed = String(body[`users__${i}__owed_share`]);
+          const prev = found.users.find((u) => u.user_id === Number(uid));
+          users.push({ user: prev?.user ?? { id: Number(uid), first_name: 'Someone', last_name: null }, user_id: Number(uid), paid_share: paid, owed_share: owed, net_balance: (Number(paid) - Number(owed)).toFixed(2) });
+        }
+        found.users = users;
+      }
+      return json({ expenses: [found], errors: {} });
+    }
     if (path === '/create_comment') {
       state.writes.push({ path, body });
       state.nextId += 1;

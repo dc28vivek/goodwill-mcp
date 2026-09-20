@@ -84,3 +84,19 @@ export function sharesBalance(total: Minor, shares: Map<number, Minor>): boolean
   for (const v of shares.values()) sum += v;
   return sum === total;
 }
+
+/**
+ * Rescale a set of shares to a new total, keeping each person's proportion.
+ *
+ * Used when an expense's cost is corrected: "the dinner was actually 90, not
+ * 84" should keep the split everyone agreed to rather than silently becoming
+ * an equal split. Largest-remainder rounding, so the result sums exactly.
+ */
+export function rescaleShares(shares: Map<number, Minor>, newTotal: Minor): Map<number, Minor> {
+  const oldTotal = [...shares.values()].reduce((a, b) => a + b, 0);
+  if (oldTotal === 0) {
+    // Nothing to scale from, so fall back to an equal split.
+    return splitEqual(newTotal, [...shares.keys()]).shares;
+  }
+  return splitByWeights(newTotal, shares).shares;
+}
