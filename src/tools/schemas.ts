@@ -1,5 +1,31 @@
 import * as z from 'zod/v4';
 
+/**
+ * Tool inputs are strict in what they advertise and liberal in what they take.
+ *
+ * Models routinely send {"older_than_days": "1"} instead of 1. A bare
+ * z.number() rejects that and the model has to notice a validation error and
+ * retry, which it often does badly or not at all. Coercion accepts both, and
+ * the JSON Schema published to the client still says "number", so nothing about
+ * the contract changes: only our tolerance for how it arrives.
+ */
+export const IntArg = () => z.coerce.number().int();
+export const NumArg = () => z.coerce.number();
+
+/**
+ * Booleans need their own handling. z.coerce.boolean() uses JavaScript
+ * truthiness, which turns the string "false" into true, so a model writing
+ * {"everything": "false"} would get the opposite of what it asked for. Only the
+ * two words mean anything; anything else is left alone to fail validation
+ * honestly.
+ */
+export const BoolArg = () =>
+  z.preprocess((v) => {
+    if (typeof v !== 'string') return v;
+    const t = v.trim().toLowerCase();
+    return t === 'true' ? true : t === 'false' ? false : v;
+  }, z.boolean());
+
 export const Money = z.string().describe('Decimal amount as a string, two places, e.g. "84.00"');
 
 export const Person = z.object({ id: z.number(), name: z.string() });

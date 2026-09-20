@@ -69,6 +69,44 @@ describe('splittab server', () => {
     for (const g of sc.groups) expect(g.your_balance.length).toBeGreaterThan(0);
   });
 
+  it('accepts a number sent as a string, which is what models actually send', async () => {
+    const { client } = await connect(state);
+    // A model wrote {"older_than_days": "1"} in a real session. Strict
+    // validation rejected it and the model had to recover on its own.
+    const r = await client.callTool({ name: 'stale_balances', arguments: { older_than_days: '1' } as unknown as Record<string, unknown> });
+    expect(r.isError).toBeFalsy();
+    expect((r.structuredContent as { older_than_days: number }).older_than_days).toBe(1);
+  });
+
+  it('accepts a boolean sent as a string, and reads "false" as false', async () => {
+    const { client } = await connect(state);
+    const yes = await client.callTool({ name: 'list_groups', arguments: { unsettled_only: 'true' } as unknown as Record<string, unknown> });
+    const no = await client.callTool({ name: 'list_groups', arguments: { unsettled_only: 'false' } as unknown as Record<string, unknown> });
+    expect(yes.isError).toBeFalsy();
+    expect(no.isError).toBeFalsy();
+    const yesGroups = (yes.structuredContent as { groups: unknown[] }).groups;
+    const noGroups = (no.structuredContent as { groups: unknown[] }).groups;
+    // Truthiness coercion would make "false" mean true and collapse these.
+    expect(noGroups.length).toBeGreaterThanOrEqual(yesGroups.length);
+  });
+
+  it('still refuses a number that is not one', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'stale_balances', arguments: { older_than_days: 'a fortnight' } as unknown as Record<string, unknown> });
+    expect(r.isError).toBeTruthy();
+  });
+
+  it('publishes plain number and boolean types, so the contract is unchanged', async () => {
+    const { client } = await connect(state);
+    const { tools } = await client.listTools();
+    const stale = tools.find((t) => t.name === 'stale_balances')!;
+    const groups = tools.find((t) => t.name === 'list_groups')!;
+    const props = stale.inputSchema.properties as Record<string, { type?: string }>;
+    expect(props.older_than_days?.type).toBe('integer');
+    const gprops = groups.inputSchema.properties as Record<string, { type?: string }>;
+    expect(gprops.unsettled_only?.type).toBe('boolean');
+  });
+
   it('serves the groups resource trimmed', async () => {
     const { client } = await connect(state);
     const res = await client.readResource({ uri: 'splitwise://groups' });

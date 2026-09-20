@@ -9,7 +9,7 @@ import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, timed, untruste
 import { type Invitee, describeResolution, resolveInvitee, resolveMember } from '../server/resolve.js';
 import type { SwAddUserToGroup, SwCreateExpenseByShares, SwCreateGroup, SwExpense, SwUser } from '../splitwise/types.js';
 import type { WriteRecord } from '../store/writeLog.js';
-import { AddExpenseOutput, AddMembersOutput, ConfirmSchema, GroupOutput, ItemSplitOutput, ReceiptItemInput, SettleOutputWrite, UpdateExpenseOutput } from './schemas.js';
+import { AddExpenseOutput, AddMembersOutput, BoolArg, ConfirmSchema, GroupOutput, IntArg, ItemSplitOutput, ReceiptItemInput, SettleOutputWrite, UpdateExpenseOutput } from './schemas.js';
 
 const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } as const;
 
@@ -154,7 +154,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       description:
         'Add a shared expense to a group from a sentence ("dinner 84, I paid, split with everyone") or from explicit fields. Step 1 returns a preview naming everyone whose balance changes and asks for confirmation. Nothing is posted until the user confirms. Checks for likely duplicates first. Equal split only in this version; give participants to limit who shares it. Posts a comment on the expense noting that Splittab MCP created it, so the group can see where it came from.',
       inputSchema: z.object({
-        group_id: z.number().int().describe('Group to post into. Call list_groups to find the id.'),
+        group_id: IntArg().describe('Group to post into. Call list_groups to find the id.'),
         text: z.string().max(300).optional().describe('A sentence like "taxi 16 paid by Sam split with me and Sam".'),
         description: z.string().max(120).optional().describe('Overrides the description parsed from text.'),
         cost: z.string().optional().describe('Decimal string like "84.00". Overrides text.'),
@@ -162,7 +162,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         payer: z.string().optional().describe('"me" or a member name or id. Defaults to me.'),
         participants: z.array(z.string()).optional().describe('Member names or ids who share the cost. Defaults to everyone in the group.'),
         date: z.string().optional().describe('YYYY-MM-DD. Defaults to today.'),
-        category_id: z.number().int().optional().describe('From splitwise://categories.'),
+        category_id: IntArg().optional().describe('From splitwise://categories.'),
         idempotency_key: z.string().max(64).optional().describe('Repeat the same key to retry safely without a second post.'),
       }),
       outputSchema: AddExpenseOutput,
@@ -337,11 +337,11 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       description:
         'Fix an expense that is already in Splitwise: a wrong amount, a typo in the description, the wrong date or category. Other people have already seen it, so the preview shows the current values next to the new ones and what each person\'s share becomes. Changing the cost keeps the split everyone agreed to, rescaled in proportion. It posts a comment saying what was corrected and that Splittab MCP did it. This cannot add or remove people, change who paid, or turn an expense into a payment; do those in the Splitwise app.',
       inputSchema: z.object({
-        expense_id: z.number().int().describe('From list_expenses or read_expense.'),
+        expense_id: IntArg().describe('From list_expenses or read_expense.'),
         description: z.string().max(120).optional(),
         cost: z.string().optional().describe('Decimal string. Shares are rescaled in proportion.'),
         date: z.string().optional().describe('YYYY-MM-DD.'),
-        category_id: z.number().int().optional(),
+        category_id: IntArg().optional(),
         notes: z.string().max(300).optional(),
         idempotency_key: z.string().max(64).optional(),
       }),
@@ -504,7 +504,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         name: z.string().min(1).max(80).describe('What the group is called, e.g. "Goa Trip".'),
         group_type: z.enum(['trip', 'home', 'couple', 'other']).default('other').describe('Use "home" for flatmates.'),
         members: z.array(z.string().max(120)).max(50).default([]).describe('Friend names, or email addresses to invite someone new. "Priya Sharma <priya@example.com>" works too. You are added automatically.'),
-        simplify_by_default: z.boolean().optional().describe('Turn on Splitwise debt simplification for this group.'),
+        simplify_by_default: BoolArg().optional().describe('Turn on Splitwise debt simplification for this group.'),
         idempotency_key: z.string().max(64).optional(),
       }),
       outputSchema: GroupOutput,
@@ -631,7 +631,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       description:
         'Add one or more people to an existing Splitwise group. Name existing friends, or give an email address to invite someone new. Anyone already in the group is skipped. Shows a preview and waits for confirmation, because an email sends a real invitation and everyone added can see the whole group history. This connector cannot remove anyone; do that in the Splitwise app.',
       inputSchema: z.object({
-        group_id: z.number().int(),
+        group_id: IntArg(),
         members: z.array(z.string().max(120)).min(1).max(50).describe('Friend names, or email addresses to invite someone new.'),
       }),
       outputSchema: AddMembersOutput,
@@ -741,7 +741,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       description:
         'Split a bill line by line instead of equally, so everyone pays for what they ordered. Read the receipt yourself (from a photo, a PDF or text the user pasted) and pass the lines in as `items`, each with who shares it. Tax and tip are allocated in proportion to what each person ordered, not split equally. Pass `total` from the receipt and the tool will refuse to post if the lines do not add up, which catches a misread photo before it becomes five wrong balances. Shows a preview and waits for confirmation, and posts a comment noting that Splittab MCP created it.',
       inputSchema: z.object({
-        group_id: z.number().int(),
+        group_id: IntArg(),
         description: z.string().max(120).describe('What the bill was, e.g. "Dinner at Cervejaria".'),
         items: z.array(ReceiptItemInput).min(1).max(100),
         tax: z.string().optional().describe('Tax as printed. Allocated in proportion to each person\'s items.'),
@@ -750,7 +750,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         currency: z.string().length(3).optional(),
         payer: z.string().optional().describe('"me" or a member name or id. Defaults to me.'),
         date: z.string().optional().describe('YYYY-MM-DD. Defaults to today.'),
-        category_id: z.number().int().optional(),
+        category_id: IntArg().optional(),
         idempotency_key: z.string().max(64).optional(),
       }),
       outputSchema: ItemSplitOutput,
@@ -934,7 +934,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         amount: z.string().optional().describe('Decimal string like "61.00". Defaults to the full outstanding balance with this person.'),
         currency: z.string().length(3).optional(),
         direction: z.enum(['i_paid', 'they_paid']).default('i_paid').describe('Who handed over the money.'),
-        group_id: z.number().int().optional().describe('Record it inside a group. Otherwise it is a direct payment.'),
+        group_id: IntArg().optional().describe('Record it inside a group. Otherwise it is a direct payment.'),
         date: z.string().optional().describe('YYYY-MM-DD. Defaults to today.'),
         idempotency_key: z.string().max(64).optional(),
       }),
