@@ -217,8 +217,13 @@
   expect:
     isError: false
     structured.posted: true
-    prompt_includes: ["This changes what Priya S and Sam K owe", "Post it?"]
+    prompt_includes:
+      - "This changes what Priya S and Sam K owe"
+      - "It will carry a comment saying Added by Goodwill MCP"
+      - "Post it?"
     writes.create_expense: 1
+    # The expense, then the trail comment saying where it came from.
+    writes.create_comment: 1
 
 - id: add-declined
   prompt: "Add coffee 10 (then say no)"
@@ -298,8 +303,13 @@
   answer: accept
   expect:
     structured.updated: true
-    prompt_includes: ["which everyone on it can already see", "cost: 84.00 -> 90.00", "Priya S: 28.00 -> 30.00"]
+    prompt_includes:
+      - "which everyone on it can already see"
+      - "cost: 84.00 -> 90.00"
+      - "Priya S: 28.00 -> 30.00"
+      - "A comment saying Added by Goodwill MCP will be posted on it."
     writes.update_expense: 1
+    writes.create_comment: 1
 
 - id: correct-declined
   prompt: "Change the dinner to 90 (then say no)"

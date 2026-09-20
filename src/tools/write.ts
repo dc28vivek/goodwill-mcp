@@ -12,6 +12,31 @@ import { AddExpenseOutput, AddMembersOutput, ConfirmSchema, GroupOutput, ItemSpl
 
 const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } as const;
 
+/**
+ * Every expense this connector creates or changes gets a comment saying so.
+ *
+ * Splitwise attributes an expense to the app that made it, but that is easy to
+ * miss. A comment is visible to everyone on the expense and says plainly that
+ * an agent did this, which is the same principle as previewing a write to the
+ * person confirming it: the people whose balances moved should be able to tell
+ * where the change came from.
+ */
+const SIGNATURE = 'Added by Goodwill MCP.';
+
+/**
+ * Post the trail comment. Never fails the write: the expense already exists by
+ * this point, and losing the note is much better than reporting failure for
+ * something that succeeded.
+ */
+async function annotate(deps: Deps, expenseId: number, what: string): Promise<boolean> {
+  try {
+    await deps.client.createComment(expenseId, `${what} ${SIGNATURE}`);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 interface AddPayload {
   body: SwCreateExpenseByShares;
   description: string;
@@ -80,7 +105,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     {
       title: 'Add an expense',
       description:
-        'Add a shared expense to a group from a sentence ("dinner 84, I paid, split with everyone") or from explicit fields. Step 1 returns a preview naming everyone whose balance changes and asks for confirmation. Nothing is posted until the user confirms. Checks for likely duplicates first. Equal split only in this version; give participants to limit who shares it.',
+        'Add a shared expense to a group from a sentence ("dinner 84, I paid, split with everyone") or from explicit fields. Step 1 returns a preview naming everyone whose balance changes and asks for confirmation. Nothing is posted until the user confirms. Checks for likely duplicates first. Equal split only in this version; give participants to limit who shares it. Posts a comment on the expense noting that Goodwill MCP created it, so the group can see where it came from.',
       inputSchema: z.object({
         group_id: z.number().int().describe('Group to post into. See splitwise://groups.'),
         text: z.string().max(300).optional().describe('A sentence like "taxi 16 paid by Sam split with me and Sam".'),
@@ -124,6 +149,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         }
         const created = await deps.client.createExpense(payload.body);
         deps.metrics.emit({ type: 'write_posted', tool: 'add_expense' });
+        await annotate(deps, created.id, `${payload.description}, ${payload.cost} ${payload.currency}, split with ${payload.affected.length + 1} ${payload.affected.length === 0 ? 'person' : 'people'}.`);
         await deps.writeLog.record(String(me.id), {
           fingerprint: pending.fingerprint,
           ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
@@ -230,6 +256,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         const d = dupes[0]!;
         preview += ` Possible duplicate: #${d.existing.id} "${untrusted(d.existing.description, 60)}" ${d.existing.cost} ${d.existing.currency_code} on ${d.existing.date.slice(0, 10)} (${Math.round(d.confidence * 100)}%: ${d.reasons.join(', ')}).`;
       }
+      preview += ` It will carry a comment saying ${SIGNATURE.replace(/\.$/, '')}, so the group can see where it came from.`;
 
       if (dupes.length) deps.metrics.emit({ type: 'duplicate_blocked', tool: 'add_expense', source: 'splitwise' });
       deps.metrics.emit({ type: 'preview_shown', tool: 'add_expense' });
@@ -255,7 +282,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     {
       title: 'Correct an expense',
       description:
-        'Fix an expense that is already in Splitwise: a wrong amount, a typo in the description, the wrong date or category. Other people have already seen it, so the preview shows the current values next to the new ones and what each person\'s share becomes. Changing the cost keeps the split everyone agreed to, rescaled in proportion. This cannot add or remove people, change who paid, or turn an expense into a payment; do those in the Splitwise app.',
+        'Fix an expense that is already in Splitwise: a wrong amount, a typo in the description, the wrong date or category. Other people have already seen it, so the preview shows the current values next to the new ones and what each person\'s share becomes. Changing the cost keeps the split everyone agreed to, rescaled in proportion. It posts a comment saying what was corrected and that Goodwill MCP did it. This cannot add or remove people, change who paid, or turn an expense into a payment; do those in the Splitwise app.',
       inputSchema: z.object({
         expense_id: z.number().int().describe('From list_expenses or read_expense.'),
         description: z.string().max(120).optional(),
@@ -294,6 +321,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         }
         await deps.client.updateExpense(payload.expenseId, payload.body);
         deps.metrics.emit({ type: 'write_posted', tool: 'update_expense' });
+        await annotate(deps, payload.expenseId, `Corrected: ${payload.changes.map((c) => `${c.field} ${c.from} to ${c.to}`).join('; ')}.`);
         await deps.writeLog.record(String(me.id), {
           fingerprint: pending.fingerprint,
           ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
@@ -388,6 +416,8 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         ...changes.map((c) => `  ${c.field}: ${c.from} -> ${c.to}`),
         ...(balanceChanges.length ? ['', 'Shares become:', ...balanceChanges.map((b) => `  ${b.person.name}: ${b.from} -> ${b.to}`)] : []),
         ...(others.length ? ['', `This changes what ${joinNames(others.map((b) => b.person.name))} owe.`] : []),
+        '',
+        `A comment saying ${SIGNATURE.replace(/\.$/, '')} will be posted on it.`,
       ].join('\n');
 
       deps.metrics.emit({ type: 'preview_shown', tool: 'update_expense' });
@@ -638,7 +668,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     {
       title: 'Split a receipt by item',
       description:
-        'Split a bill line by line instead of equally, so everyone pays for what they ordered. Read the receipt yourself (from a photo, a PDF or text the user pasted) and pass the lines in as `items`, each with who shares it. Tax and tip are allocated in proportion to what each person ordered, not split equally. Pass `total` from the receipt and the tool will refuse to post if the lines do not add up, which catches a misread photo before it becomes five wrong balances. Shows a preview and waits for confirmation.',
+        'Split a bill line by line instead of equally, so everyone pays for what they ordered. Read the receipt yourself (from a photo, a PDF or text the user pasted) and pass the lines in as `items`, each with who shares it. Tax and tip are allocated in proportion to what each person ordered, not split equally. Pass `total` from the receipt and the tool will refuse to post if the lines do not add up, which catches a misread photo before it becomes five wrong balances. Shows a preview and waits for confirmation, and posts a comment noting that Goodwill MCP created it.',
       inputSchema: z.object({
         group_id: z.number().int(),
         description: z.string().max(120).describe('What the bill was, e.g. "Dinner at Cervejaria".'),
@@ -682,6 +712,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         }
         const created = await deps.client.createExpense(payload.body);
         deps.metrics.emit({ type: 'write_posted', tool: 'split_by_items' });
+        await annotate(deps, created.id, `Split by item: ${payload.breakdown.map((b) => `${b.person.name} ${b.owes}`).join(', ')}.`);
         await deps.writeLog.record(String(me.id), {
           fingerprint: pending.fingerprint,
           ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
@@ -794,6 +825,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         `Add "${description}" for ${fromMinor(split.total)} ${currency} to ${untrusted(group.name, 60)} on ${date}, split by item. ${fullName(payer)} paid.${extrasNote}`,
         ...rows,
         affected.length ? `This changes what ${joinNames(affected)} owe.` : '',
+        `It will carry a comment saying ${SIGNATURE.replace(/\.$/, '')}.`,
       ]
         .filter(Boolean)
         .join('\n');
@@ -819,7 +851,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     {
       title: 'Record a payment',
       description:
-        'Record that money changed hands, so the balance closes in Splitwise. Use this after you actually paid someone (or they paid you) through Venmo, UPI, a bank transfer or cash. Defaults to the full outstanding balance. Shows a preview and waits for confirmation. This does not move money; it records a payment that already happened.',
+        'Record that money changed hands, so the balance closes in Splitwise. Use this after you actually paid someone (or they paid you) through Venmo, UPI, a bank transfer or cash. Defaults to the full outstanding balance. Shows a preview and waits for confirmation. This does not move money; it records a payment that already happened. Posts a comment noting that Goodwill MCP recorded it.',
       inputSchema: z.object({
         friend: z.string().describe('Member name or id.'),
         amount: z.string().optional().describe('Decimal string like "61.00". Defaults to the full outstanding balance with this person.'),
@@ -858,6 +890,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         }
         const created = await deps.client.createExpense(payload.body);
         deps.metrics.emit({ type: 'write_posted', tool: 'settle_up' });
+        await annotate(deps, created.id, `Recorded a payment of ${payload.amount} ${payload.currency} from ${payload.fromName} to ${payload.toName}.`);
         await deps.writeLog.record(String(me.id), {
           fingerprint: pending.fingerprint,
           ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
@@ -965,7 +998,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
             : remaining > 0
               ? ` ${fromMinor(remaining)} ${currency} would still be open.`
               : ` That is ${fromMinor(-remaining)} ${currency} more than is outstanding.`;
-      const preview = `Record a payment: ${fromName} paid ${toName} ${fromMinor(amountMinor)} ${currency} on ${date}.${after} This changes what ${fullName(target)} owes.`;
+      const preview = `Record a payment: ${fromName} paid ${toName} ${fromMinor(amountMinor)} ${currency} on ${date}.${after} This changes what ${fullName(target)} owes. It will carry a comment saying ${SIGNATURE.replace(/\.$/, '')}.`;
 
       deps.metrics.emit({ type: 'preview_shown', tool: 'settle_up' });
       const payload: SettlePayload = { body, fromName, toName, amount: fromMinor(amountMinor), currency };

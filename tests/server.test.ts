@@ -635,4 +635,43 @@ describe('goodwill server', () => {
     expect(text).toContain('paid by you');
     expect(text).toMatch(/^\s*You\s+paid/m);
   });
+
+  it('leaves a trail comment on an expense it creates', async () => {
+    const { client, prompts } = await connect(state, true);
+    await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'coffee 10, I paid, split with me, Priya and Sam' } });
+    expect(prompts[0]).toContain('It will carry a comment saying Added by Goodwill MCP');
+    const comment = state.comments.at(-1);
+    expect(comment?.content).toContain('coffee, 10.00 EUR');
+    expect(comment?.content.endsWith('Added by Goodwill MCP.')).toBe(true);
+  });
+
+  it('says what it corrected in the trail comment', async () => {
+    const { client } = await connect(state, true);
+    const dinner = state.expenses.find((e) => e.description.startsWith('Dinner'))!;
+    await client.callTool({ name: 'update_expense', arguments: { expense_id: dinner.id, cost: '90.00' } });
+    const comment = state.comments.at(-1);
+    expect(comment?.content).toContain('Corrected: cost 84.00 to 90.00');
+    expect(comment?.content.endsWith('Added by Goodwill MCP.')).toBe(true);
+  });
+
+  it('signs a recorded payment too', async () => {
+    const { client } = await connect(state, true);
+    await client.callTool({ name: 'settle_up', arguments: { friend: 'Priya', group_id: 100 } });
+    expect(state.comments.at(-1)?.content).toContain('Recorded a payment of 61.00 EUR');
+  });
+
+  it('still reports success when the trail comment cannot be posted', async () => {
+    const { client } = await connect(state, true);
+    // Comments start failing after the expense is created.
+    const original = state.comments;
+    Object.defineProperty(state, 'comments', {
+      get: () => original,
+      set: () => {
+        throw new Error('comment service down');
+      },
+      configurable: true,
+    });
+    const r = await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'tea 5' } });
+    expect((r.structuredContent as { posted: boolean }).posted).toBe(true);
+  });
 });

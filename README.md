@@ -82,6 +82,7 @@ Resources: `splitwise://groups`, `splitwise://categories`, `splitwise://currenci
 Every expense you add changes what other people owe. So:
 
 - **Every write previews and waits.** The tool returns the split, names the people whose balances change, and posts only after you confirm. This uses the MCP 2026-07-28 multi round-trip pattern, so the confirmation is a real protocol step, not a prompt the model can talk itself out of.
+- **Every change signs itself.** An expense this connector adds or corrects gets a comment saying what happened and that Goodwill MCP did it, visible to everyone on the expense. Splitwise attributes expenses to the app that made them, but that is easy to miss; a comment is not.
 - **No deletes.** There is no tool that removes an expense, a group, or a member. If a duplicate should go, you remove it in the Splitwise app.
 - **Corrections show what they overwrite.** `update_expense` is the only tool that changes something people have already seen, so its preview puts the current values next to the new ones and spells out what each person's share becomes. On the hosted server it needs a `modify` scope that is not granted by default.
 - **No double posts.** A write log keyed by group, amount, day, payer and normalised description refuses to post the same expense twice within 48 hours, across retries and across devices.
