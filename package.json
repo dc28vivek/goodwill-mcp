@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Splittab: an unofficial Splitwise MCP server. Explain balances, settle up, add expenses in a sentence. Every write is confirmed and nothing is ever deleted.",
   "scripts": {
-    "build": "tsc -p tsconfig.build.json",
+    "build": "rm -rf dist && tsc -p tsconfig.build.json",
     "conformance": "tsx evals/conformance.ts --expected-failures conformance-baseline.yml",
     "deploy": "wrangler deploy",
     "dev:http": "tsx src/bin/http.ts",
@@ -55,7 +55,7 @@
     "yaml": "^2.9.1"
   },
   "bin": {
-    "splittab-mcp": "./dist/bin/stdio.js"
+    "splittab-mcp": "dist/bin/stdio.js"
   },
   "files": [
     "dist",
