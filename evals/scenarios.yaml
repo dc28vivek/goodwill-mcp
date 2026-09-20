@@ -187,18 +187,6 @@
     structured.stale.length: 2
     structured.stale.0.counterparty.name: "Priya S"
 
-- id: settle-lisbon
-  model: true
-  prompt: "How do we settle Lisbon?"
-  tool: settle_plan
-  args: { group: 100 }
-  expect:
-    isError: false
-    structured.plans.0.payments.length: 2
-    structured.plans.0.matches_splitwise: true
-    structured.plans.0.yours: 2
-    text_includes: ["Priya S pays you 61.00 EUR", "You would receive 81.00 in total."]
-
 - id: reconcile-clean
   model: true
   model_args_include: { group: 100 }

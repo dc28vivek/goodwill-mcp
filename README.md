@@ -49,7 +49,7 @@ Your key stays on your machine. Nothing is sent anywhere except Splitwise's own 
 - *"That dinner was actually 90, not 84"* — shows before and after, and what each share becomes
 - *"Priya paid me back, record it"* — closes the balance
 
-Sixteen tools, three resources, one prompt:
+Fifteen tools, three resources, one prompt:
 
 | Tool | What it does | Writes? |
 |---|---|---|
@@ -61,7 +61,6 @@ Sixteen tools, three resources, one prompt:
 | `overall_balances` | Everything you owe and are owed, across every group | no |
 | `find_missing_expenses` | Which card transactions haven't been added to Splitwise yet | no |
 | `stale_balances` | Who is late, by how long | no |
-| `settle_plan` | Minimum payments to close a group, checked against Splitwise | no |
 | `find_duplicates` | Likely duplicates with a confidence and a suggested action | no |
 | `create_group` | A new group, with friends added and strangers invited by email | after confirmation |
 | `add_to_group` | People added to an existing group | after confirmation |

@@ -6,13 +6,12 @@ import { KIND_LABELS, changeSummary, collapseTransient, toActivity } from '../do
 import { type SinceMode, explainBalance } from '../domain/explain.js';
 import { fromMinor, toMinor } from '../domain/money.js';
 import { overallPosition } from '../domain/position.js';
-import { settlePlan } from '../domain/settle.js';
 import { staleBalances } from '../domain/stale.js';
 import type { Deps } from '../server/deps.js';
 import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, sentenceCase, timed, untrusted, who } from '../server/format.js';
 import { describeGroupResolution, describeResolution, resolveGroup, resolveMember } from '../server/resolve.js';
 import type { SwUser } from '../splitwise/types.js';
-import { ActivityOutput, BoolArg, ExplainOutput, GroupArg, GroupsOutput, IntArg, ListExpensesOutput, MissingOutput, NumArg, OverallOutput, ReadExpenseOutput, ReconcileOutput, SettleOutput, StaleOutput, TransactionInput } from './schemas.js';
+import { ActivityOutput, BoolArg, ExplainOutput, GroupArg, GroupsOutput, IntArg, ListExpensesOutput, MissingOutput, NumArg, OverallOutput, ReadExpenseOutput, ReconcileOutput, StaleOutput, TransactionInput } from './schemas.js';
 
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
 
@@ -730,91 +729,6 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         ? stale.map((s) => `${s.counterparty.name}: ${s.direction === 'they_owe_you' ? 'owes you' : 'you owe'} ${s.amount} ${s.currency}, ${s.age_days} days since last activity (${s.last_activity})`).join('\n')
         : `No balances older than ${older_than_days} days.`;
       return ok(text, { older_than_days, stale });
-    }),
-  );
-
-  server.registerTool(
-    'settle_plan',
-    {
-      title: 'Plan a settle-up',
-      description: 'Compute the minimum set of payments that closes out a group, with who pays whom. Checked against the simplified debts Splitwise shows. Does not move money and does not record payments.',
-      inputSchema: z.object({
-        group: GroupArg(),
-        everything: z
-          .boolean()
-          .default(false)
-          .describe('By default only the payments you are part of are listed. Set true for the whole group plan, including payments between other people.'),
-      }),
-      outputSchema: SettleOutput,
-      annotations: READ,
-    },
-    timed(deps, 'settle_plan', async ({ group: groupRef, everything }, ctx) => {
-      const denied = missingScope(ctx, 'read');
-      if (denied) return denied;
-      const resolved = await toGroupId(deps, groupRef);
-      if (!resolved.ok) return fail(resolved.message);
-      const group_id = resolved.id;
-      const [me, group] = await Promise.all([deps.me(), deps.group(group_id)]);
-      const byId = new Map(group.members.map((m) => [m.id, m]));
-      const currencies = new Set<string>();
-      for (const m of group.members) for (const b of m.balance) currencies.add(b.currency_code);
-
-      const meId = me.id;
-      const plans = [...currencies].map((currency) => {
-        const positions = new Map<number, number>();
-        for (const m of group.members) {
-          const b = m.balance.find((x) => x.currency_code === currency);
-          positions.set(m.id, b ? toMinor(b.amount) : 0);
-        }
-        let payments: { from: number; to: number; amount: number }[];
-        try {
-          payments = settlePlan(positions);
-        } catch {
-          // Balances can be off by rounding across currencies; fall back to Splitwise's own plan.
-          payments = group.simplified_debts.filter((d) => d.currency_code === currency).map((d) => ({ from: d.from, to: d.to, amount: toMinor(d.amount) }));
-        }
-        const sw = group.simplified_debts
-          .filter((d) => d.currency_code === currency)
-          .map((d) => `${d.from}>${d.to}:${toMinor(d.amount)}`)
-          .toSorted();
-        const ours = payments.map((p) => `${p.from}>${p.to}:${p.amount}`).toSorted();
-        return {
-          currency,
-          payments: payments.map((p) => ({
-            from: person(byId.get(p.from) ?? { id: p.from, first_name: `User ${p.from}`, last_name: null }),
-            to: person(byId.get(p.to) ?? { id: p.to, first_name: `User ${p.to}`, last_name: null }),
-            amount: fromMinor(p.amount),
-          })),
-          matches_splitwise: sw.join(',') === ours.join(','),
-          yours: payments.filter((p) => p.from === meId || p.to === meId).length,
-        };
-      });
-
-      // A settle plan covers the whole group, but the person asking is one
-      // member. Theirs first, everyone else's only when asked for.
-      const rows = plans.flatMap((p) =>
-        p.payments.map((x) => ({
-          currency: p.currency,
-          mine: x.from.id === me.id || x.to.id === me.id,
-          line: `${sentenceCase(who({ id: x.from.id, first_name: x.from.name }, me.id))} pays ${who({ id: x.to.id, first_name: x.to.name }, me.id)} ${x.amount} ${p.currency}`,
-          signed: x.to.id === me.id ? toMinor(x.amount) : x.from.id === me.id ? -toMinor(x.amount) : 0,
-        })),
-      );
-      const mine = rows.filter((r) => r.mine);
-      const others = rows.length - mine.length;
-      const shown = everything ? rows : mine;
-      const net = mine.reduce((acc, r) => acc + r.signed, 0);
-      const lines = [
-        ...shown.map((r) => r.line),
-        ...(mine.length > 1 ? ['', net > 0 ? `You would receive ${fromMinor(net)} in total.` : net < 0 ? `You would pay ${fromMinor(-net)} in total.` : 'Your payments cancel out.'] : []),
-        ...(!everything && others > 0 ? ['', `${others} other payment${others === 1 ? '' : 's'} between other people ${others === 1 ? 'is' : 'are'} not listed.`] : []),
-      ];
-      const note = 'Record each payment in Splitwise once it is made (settle_up in the app, or ask me to record it). This plan does not move money.';
-      return ok(shown.length ? `${lines.join('\n')}\n\n${note}` : others > 0 ? `You are settled up in this group. ${others} payment${others === 1 ? '' : 's'} remain between other people; ask for everything to see them.` : 'Everyone is settled. Nothing to pay.', {
-        group: { id: group.id, name: untrusted(group.name, 80), url: GROUP_URL(group.id) },
-        plans,
-        note,
-      });
     }),
   );
 

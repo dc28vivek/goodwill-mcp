@@ -24,7 +24,6 @@ const READ_ONLY = new Set([
   'overall_balances',
   'find_missing_expenses',
   'stale_balances',
-  'settle_plan',
   'find_duplicates',
 ]);
 
@@ -98,7 +97,6 @@ async function main() {
   if (target) {
     console.log(`\n--- drilling into "${target.name}" (id ${target.id}) ---`);
     await run(`explain_balance (whole group)`, 'explain_balance', { group: target.id });
-    await run(`settle_plan`, 'settle_plan', { group: target.id });
     await run(`find_duplicates (365 days)`, 'find_duplicates', { group: target.id, since_days: 365 });
     await run(`list_expenses (90 days)`, 'list_expenses', { group: target.id });
     const other = target.members.find((m) => m.id !== me.id);

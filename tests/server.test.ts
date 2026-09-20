@@ -32,7 +32,7 @@ describe('splittab server', () => {
   it('lists every tool with honest annotations and fixed order', async () => {
     const { client } = await connect(state);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['list_groups', 'explain_balance', 'list_expenses', 'read_expense', 'recent_activity', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'update_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up']);
+    expect(tools.map((t) => t.name)).toEqual(['list_groups', 'explain_balance', 'list_expenses', 'read_expense', 'recent_activity', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'find_duplicates', 'add_expense', 'update_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up']);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.explain_balance?.annotations?.readOnlyHint).toBe(true);
     expect(byName.add_expense?.annotations?.readOnlyHint).toBe(false);
@@ -147,8 +147,8 @@ describe('splittab server', () => {
 
   it('takes a group by name, which is how people refer to groups', async () => {
     const { client } = await connect(state);
-    const byName = await client.callTool({ name: 'settle_plan', arguments: { group: 'Lisbon' } });
-    const byId = await client.callTool({ name: 'settle_plan', arguments: { group: 100 } });
+    const byName = await client.callTool({ name: 'find_duplicates', arguments: { group: 'Lisbon' } });
+    const byId = await client.callTool({ name: 'find_duplicates', arguments: { group: 100 } });
     expect(byName.isError).toBeFalsy();
     expect(byName.structuredContent).toEqual(byId.structuredContent);
   });
@@ -161,7 +161,7 @@ describe('splittab server', () => {
 
   it('lists the real groups when the name is wrong, instead of only refusing', async () => {
     const { client } = await connect(state);
-    const r = await client.callTool({ name: 'settle_plan', arguments: { group: 'Reykjavik' } });
+    const r = await client.callTool({ name: 'find_duplicates', arguments: { group: 'Reykjavik' } });
     expect(r.isError).toBeTruthy();
     const text = String((r.content[0] as { text: string }).text);
     expect(text).toContain('no group called "Reykjavik"');
@@ -211,17 +211,6 @@ describe('splittab server', () => {
     const r = await client.callTool({ name: 'explain_balance', arguments: { group: 100, friend: 'Alex' } });
     expect(r.isError).toBe(true);
     expect((r.content[0] as { text: string }).text).toContain('matches 2 people');
-  });
-
-  it('plans a settle-up that matches Splitwise', async () => {
-    const { client } = await connect(state);
-    const r = await client.callTool({ name: 'settle_plan', arguments: { group: 100 } });
-    const sc = r.structuredContent as { plans: { payments: { from: { name: string }; to: { name: string }; amount: string }[]; matches_splitwise: boolean }[] };
-    expect(sc.plans[0]?.payments).toEqual([
-      { from: { id: 2, name: 'Priya S' }, to: { id: 1, name: 'Vivek D' }, amount: '61.00' },
-      { from: { id: 3, name: 'Sam K' }, to: { id: 1, name: 'Vivek D' }, amount: '20.00' },
-    ]);
-    expect(sc.plans[0]?.matches_splitwise).toBe(true);
   });
 
   it('finds no duplicates in a clean group and one after a double post', async () => {
@@ -712,31 +701,6 @@ describe('splittab server', () => {
     expect(String((r.content[0] as { text: string }).text)).toContain('Nothing involving you');
   });
 
-
-  it('centres the settle plan on you, and says how many payments are not yours', async () => {
-    // Give the group a debt between two other members as well as ones involving me.
-    state.groups[0]!.members = state.groups[0]!.members.map((m) =>
-      m.id === 4 ? { ...m, balance: [{ currency_code: 'EUR', amount: '-10.00' }] } : m.id === 5 ? { ...m, balance: [{ currency_code: 'EUR', amount: '10.00' }] } : m,
-    );
-    const { client } = await connect(state);
-    const r = await client.callTool({ name: 'settle_plan', arguments: { group: 100 } });
-    const text = String((r.content[0] as { text: string }).text);
-    expect(text).toContain('Priya S pays you 61.00 EUR');
-    expect(text).not.toContain('pays Vivek D');
-    expect(text).toContain('You would receive 81.00 in total.');
-    expect(text).toContain('1 other payment between other people is not listed.');
-  });
-
-  it('shows the whole group plan when asked for everything', async () => {
-    state.groups[0]!.members = state.groups[0]!.members.map((m) =>
-      m.id === 4 ? { ...m, balance: [{ currency_code: 'EUR', amount: '-10.00' }] } : m.id === 5 ? { ...m, balance: [{ currency_code: 'EUR', amount: '10.00' }] } : m,
-    );
-    const { client } = await connect(state);
-    const r = await client.callTool({ name: 'settle_plan', arguments: { group: 100, everything: true } });
-    const text = String((r.content[0] as { text: string }).text);
-    expect(text).toContain('Alex Ahuja pays Alex Brown 10.00 EUR');
-    expect(text).not.toContain('not listed');
-  });
 
   it('names you as you in a single expense breakdown', async () => {
     const { client } = await connect(state);

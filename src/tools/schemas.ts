@@ -107,19 +107,6 @@ export const StaleOutput = z.object({
   ),
 });
 
-export const SettleOutput = z.object({
-  group: z.object({ id: z.number(), name: z.string(), url: z.string() }),
-  plans: z.array(
-    z.object({
-      currency: z.string(),
-      payments: z.array(z.object({ from: Person, to: Person, amount: Money })),
-      yours: z.number().describe('How many of these payments you are part of.'),
-      matches_splitwise: z.boolean().describe('True when this plan equals the simplified debts Splitwise shows in the app.'),
-    }),
-  ),
-  note: z.string(),
-});
-
 export const ReconcileOutput = z.object({
   group_id: z.number(),
   scanned: z.number(),

@@ -112,7 +112,7 @@ export function buildServer(deps: Deps): McpServer {
     'close_out_trip',
     {
       title: 'Close out a trip',
-      description: 'Find duplicates, explain every balance, and produce a settle-up plan for one group.',
+      description: 'Find duplicates and explain every balance in one group, ready to paste into the group chat.',
       argsSchema: z.object({ group: z.string().describe('Group name or id') }),
     },
     ({ group }) => ({
@@ -126,8 +126,7 @@ export function buildServer(deps: Deps): McpServer {
 1. Call list_groups and find the group id.
 2. Run find_duplicates on it. If there are likely duplicates, list them and stop for my decision before doing anything else.
 3. Run explain_balance for the group so each person can see what their number is made of.
-4. Run settle_plan and present who pays whom.
-5. Write a short summary I can paste into the group chat: one line per person with what they owe or are owed and to whom, then the payment plan. Plain words, no markdown tables.`,
+4. Write a short summary I can paste into the group chat: one line per person with what they owe or are owed and to whom. Plain words, no markdown tables. Splitwise itself works out the shortest set of payments, so point people at the app for that rather than inventing one.`,
           },
         },
       ],
