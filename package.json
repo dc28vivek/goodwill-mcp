@@ -18,7 +18,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:worker": "tsc -p tsconfig.worker.json",
     "smoke:package": "tsx evals/package-smoke.ts",
-    "doctor": "tsx evals/real-account.ts"
+    "doctor": "tsx evals/real-account.ts",
+    "sweep": "tsx evals/write-sweep.ts"
   },
   "keywords": [
     "mcp",

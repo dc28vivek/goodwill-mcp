@@ -651,4 +651,15 @@ describe('goodwill server', () => {
     expect((r.structuredContent as { posted: boolean }).posted).toBe(true);
   });
 
+
+  it('reads naturally whichever group type is chosen', async () => {
+    const { client, prompts } = await connect(state, 'decline');
+    await client.callTool({ name: 'create_group', arguments: { name: 'Goa', group_type: 'trip', members: [] } });
+    expect(prompts[0]).toContain('Create a trip group called "Goa"');
+    prompts.length = 0;
+    // "other" is Splitwise's catch-all, not a description, so the word is dropped.
+    await client.callTool({ name: 'create_group', arguments: { name: 'Bits', group_type: 'other', members: [] } });
+    expect(prompts[0]).toContain('Create a group called "Bits"');
+    expect(prompts[0]).not.toContain('a other');
+  });
 });

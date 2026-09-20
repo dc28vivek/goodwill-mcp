@@ -125,6 +125,7 @@ npm run smoke:package    # packs, installs the tarball elsewhere, drives the ins
 npm run smoke:worker     # boots wrangler dev and checks the OAuth plumbing
 npm run build            # compile the publishable stdio server to dist/
 npm run doctor           # read-only check against YOUR real Splitwise account (needs SPLITWISE_API_KEY)
+npm run sweep            # exercises every write tool in a throwaway group on your real account
 ```
 
 ## Not affiliated with Splitwise

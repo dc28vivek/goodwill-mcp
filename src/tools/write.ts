@@ -528,7 +528,10 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
 
       const known = members.filter((m) => m.status === 'already_on_splitwise');
       const invites = members.filter((m) => m.status === 'invited');
-      const lines = [`Create a ${args.group_type} group called "${name}" with you in it.`];
+      // "a other group" reads badly, and "other" is Splitwise's catch-all rather
+      // than a description, so the generic case drops the word entirely.
+      const kind = args.group_type === 'other' ? 'a group' : `a ${args.group_type} group`;
+      const lines = [`Create ${kind} called "${name}" with you in it.`];
       if (known.length) lines.push(`  Adding, already on Splitwise: ${known.map((m) => m.name).join(', ')}`);
       if (invites.length) lines.push(`  Inviting by email (they will receive a real invitation): ${invites.map((m) => m.name).join(', ')}`);
       if (!members.length) lines.push('  Nobody else yet. You can add people later with add_to_group.');
