@@ -27,10 +27,13 @@ export interface Deps {
   /** Memoized per request. */
   me(): Promise<SwCurrentUser>;
   group(id: number): Promise<SwGroup>;
+  /** Every group the caller is in. Memoized, because name resolution needs it constantly. */
+  groups(): Promise<SwGroup[]>;
 }
 
-export function makeDeps(base: Omit<Deps, 'me' | 'group'>): Deps {
+export function makeDeps(base: Omit<Deps, 'me' | 'group' | 'groups'>): Deps {
   let mePromise: Promise<SwCurrentUser> | undefined;
+  let allPromise: Promise<SwGroup[]> | undefined;
   const groups = new Map<number, Promise<SwGroup>>();
   return {
     ...base,
@@ -45,6 +48,10 @@ export function makeDeps(base: Omit<Deps, 'me' | 'group'>): Deps {
         groups.set(id, p);
       }
       return p;
+    },
+    groups() {
+      allPromise ??= base.client.groups();
+      return allPromise;
     },
   };
 }

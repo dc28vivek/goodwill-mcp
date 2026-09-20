@@ -154,7 +154,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       description:
         'Add a shared expense to a group from a sentence ("dinner 84, I paid, split with everyone") or from explicit fields. Step 1 returns a preview naming everyone whose balance changes and asks for confirmation. Nothing is posted until the user confirms. Checks for likely duplicates first. Equal split only in this version; give participants to limit who shares it. Posts a comment on the expense noting that Splittab MCP created it, so the group can see where it came from.',
       inputSchema: z.object({
-        group_id: z.number().int().describe('Group to post into. See splitwise://groups.'),
+        group_id: z.number().int().describe('Group to post into. Call list_groups to find the id.'),
         text: z.string().max(300).optional().describe('A sentence like "taxi 16 paid by Sam split with me and Sam".'),
         description: z.string().max(120).optional().describe('Overrides the description parsed from text.'),
         cost: z.string().optional().describe('Decimal string like "84.00". Overrides text.'),

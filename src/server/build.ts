@@ -14,7 +14,7 @@ Rules:
 2. Every tool that changes anything (add_expense, update_expense, settle_up and the rest) first returns a preview and asks the user to confirm. Show the preview to the user in plain words and wait for their answer. Never answer the confirmation yourself.
 3. This connector never deletes anything. If a duplicate should be removed, tell the user to do it in the Splitwise app.
 4. Amounts are decimal strings with a currency code. Do not convert between currencies.
-5. Start with the splitwise://groups resource to learn group ids and member names.`;
+5. Tools that take a group need its numeric id. Call list_groups first to get it, and to see who is in each group. The splitwise://groups resource holds the same thing for clients that surface resources.`;
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -103,7 +103,7 @@ export function buildServer(deps: Deps): McpServer {
             type: 'text' as const,
             text: `Close out the Splitwise group "${group}".
 
-1. Read splitwise://groups and find the group id.
+1. Call list_groups and find the group id.
 2. Run find_duplicates on it. If there are likely duplicates, list them and stop for my decision before doing anything else.
 3. Run explain_balance for the group so each person can see what their number is made of.
 4. Run settle_plan and present who pays whom.

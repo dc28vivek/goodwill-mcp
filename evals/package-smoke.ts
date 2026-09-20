@@ -64,7 +64,7 @@ async function main() {
     checks.push(['server identifies itself', info?.name === 'splittab-mcp', `name=${info?.name}`]);
 
     const { tools } = await client.listTools();
-    checks.push(['fifteen tools listed', tools.length === 15, tools.map((t) => t.name).join(', ')]);
+    checks.push(['sixteen tools listed', tools.length === 16, tools.map((t) => t.name).join(', ')]);
 
     const res = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Priya' } });
     const b = (res.structuredContent as { balances?: { charged?: string; remaining?: string }[] })?.balances?.[0];

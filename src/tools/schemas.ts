@@ -36,6 +36,27 @@ export const ExplainOutput = z.object({
   ),
 });
 
+export const GroupsOutput = z.object({
+  groups: z.array(
+    z.object({
+      id: z.number(),
+      name: z.string(),
+      type: z.string().nullable(),
+      url: z.string(),
+      members: z.array(Person),
+      your_balance: z.array(
+        z.object({
+          currency: z.string(),
+          amount: Money,
+          direction: z.enum(['they_owe_you', 'you_owe_them', 'settled']),
+        }),
+      ),
+      last_activity: z.string(),
+    }),
+  ),
+  note: z.string(),
+});
+
 export const StaleOutput = z.object({
   older_than_days: z.number(),
   stale: z.array(

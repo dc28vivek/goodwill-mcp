@@ -29,15 +29,44 @@ describe('splittab server', () => {
     state = makeState();
   });
 
-  it('lists six tools with honest annotations and fixed order', async () => {
+  it('lists every tool with honest annotations and fixed order', async () => {
     const { client } = await connect(state);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'list_expenses', 'read_expense', 'recent_activity', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'update_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up']);
+    expect(tools.map((t) => t.name)).toEqual(['list_groups', 'explain_balance', 'list_expenses', 'read_expense', 'recent_activity', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'update_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up']);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.explain_balance?.annotations?.readOnlyHint).toBe(true);
     expect(byName.add_expense?.annotations?.readOnlyHint).toBe(false);
     expect(byName.add_expense?.annotations?.destructiveHint).toBe(false);
     for (const t of tools) expect(t.outputSchema).toBeDefined();
+  });
+
+  it('lists groups with ids, so a group can be found without opening the Splitwise app', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'list_groups', arguments: {} });
+    const sc = r.structuredContent as { groups: { id: number; name: string; members: unknown[]; your_balance: unknown[] }[] };
+    expect(sc.groups.length).toBeGreaterThan(0);
+    const first = sc.groups[0]!;
+    expect(first.id).toBeGreaterThan(0);
+    expect(first.name).toBeTruthy();
+    expect(first.members.length).toBeGreaterThan(0);
+    // The id has to be in the prose too: that is the whole point of the tool.
+    const text = String((r.content[0] as { text: string }).text);
+    expect(text).toContain(`id ${first.id}`);
+    expect(text).toContain(first.name);
+  });
+
+  it('never lists group 0, which is Splitwise\'s bucket for non-group expenses', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'list_groups', arguments: {} });
+    const sc = r.structuredContent as { groups: { id: number }[] };
+    expect(sc.groups.map((g) => g.id)).not.toContain(0);
+  });
+
+  it('can narrow to groups that still owe something', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'list_groups', arguments: { unsettled_only: true } });
+    const sc = r.structuredContent as { groups: { your_balance: unknown[] }[] };
+    for (const g of sc.groups) expect(g.your_balance.length).toBeGreaterThan(0);
   });
 
   it('serves the groups resource trimmed', async () => {

@@ -49,10 +49,11 @@ Your key stays on your machine. Nothing is sent anywhere except Splitwise's own 
 - *"That dinner was actually 90, not 84"* — shows before and after, and what each share becomes
 - *"Priya paid me back, record it"* — closes the balance
 
-Fifteen tools, three resources, one prompt:
+Sixteen tools, three resources, one prompt:
 
 | Tool | What it does | Writes? |
 |---|---|---|
+| `list_groups` | Your groups, their ids, who is in them, and what you owe or are owed in each | no |
 | `explain_balance` | Charged, paid back, what's left, and every expense with your share of it | no |
 | `recent_activity` | What changed: expenses added, comments, people joining, settle-ups | no |
 | `list_expenses` | What was spent in a group or with a person, over a date range | no |
