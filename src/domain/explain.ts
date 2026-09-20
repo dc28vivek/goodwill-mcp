@@ -8,8 +8,22 @@ export interface Contribution {
   currency: string;
   /** Positive: the counterparty owes `me` from this expense. Negative: I owe them. */
   amount: Minor;
+  /** What the whole expense cost, so a share can be read against it. */
+  total: Minor;
   kind: 'expense' | 'payment';
 }
+
+/**
+ * Where to start explaining from.
+ *
+ * - `last_settled`: after the balance last stood at exactly zero. Nothing is
+ *   carried forward, because the excluded history nets out.
+ * - `last_payment`: after the most recent payment of any size. A partial
+ *   payment leaves a balance behind, which is carried forward.
+ * - `all`: the whole history.
+ * - `{ after }`: everything dated after this ISO date.
+ */
+export type SinceMode = 'last_settled' | 'last_payment' | 'all' | { after: string };
 
 export interface BalanceExplanation {
   meId: number;
@@ -25,13 +39,21 @@ export interface BalanceExplanation {
    */
   charged: Minor;
   settled: Minor;
+  /**
+   * What was already owed when the window opens. Zero for `last_settled` by
+   * definition; non-zero when a payment or a date cuts mid-history. Always
+   * `net = broughtForward + charged + settled`.
+   */
+  broughtForward: Minor;
   expenseCount: number;
   paymentCount: number;
   /**
-   * The date the previous period was settled, if it ever was. Everything on or
-   * before this is closed and is left out of the figures above.
+   * The date the window opens after, if anything was excluded. Everything on
+   * or before this is left out of the figures above.
    */
   settledOn: string | null;
+  /** Which rule chose the window. */
+  since: 'last_settled' | 'last_payment' | 'all' | 'date';
   /** How many closed items were left out. */
   closedCount: number;
   contributions: Contribution[];
@@ -49,7 +71,7 @@ export interface BalanceExplanation {
  * This mirrors how Splitwise shows "you are owed X for Dinner" on an expense
  * card, so the explanation matches what the user sees in the app.
  */
-export function explainBalance(meId: number, counterpartyId: number, expenses: SwExpense[]): BalanceExplanation[] {
+export function explainBalance(meId: number, counterpartyId: number, expenses: SwExpense[], since: SinceMode = 'last_settled'): BalanceExplanation[] {
   const byCurrency = new Map<string, Contribution[]>();
 
   for (const e of expenses) {
@@ -84,6 +106,7 @@ export function explainBalance(meId: number, counterpartyId: number, expenses: S
       date: e.date,
       currency: e.currency_code,
       amount,
+      total: toMinor(e.cost),
       kind: e.payment ? 'payment' : 'expense',
     });
     byCurrency.set(e.currency_code, list);
@@ -92,17 +115,36 @@ export function explainBalance(meId: number, counterpartyId: number, expenses: S
   return [...byCurrency.entries()].map(([currency, all]) => {
     const chronological = [...all].sort((a, b) => a.date.localeCompare(b.date));
 
-    // Everything up to the last moment the balance stood at zero is closed.
-    // Explaining a balance means explaining what has happened since then, not
-    // replaying years of settled history.
-    let running = 0;
-    let lastZero = -1;
-    for (let i = 0; i < chronological.length; i += 1) {
-      running += chronological[i]!.amount;
-      if (running === 0) lastZero = i;
+    // Choose where the window opens. Everything before it is summarised as a
+    // single brought-forward figure rather than replayed line by line.
+    let cutAfter = -1;
+    let mode: BalanceExplanation['since'] = 'all';
+    if (since === 'last_settled') {
+      mode = 'last_settled';
+      let running = 0;
+      for (let i = 0; i < chronological.length; i += 1) {
+        running += chronological[i]!.amount;
+        if (running === 0) cutAfter = i;
+      }
+    } else if (since === 'last_payment') {
+      mode = 'last_payment';
+      for (let i = chronological.length - 1; i >= 0; i -= 1) {
+        if (chronological[i]!.kind === 'payment') {
+          cutAfter = i;
+          break;
+        }
+      }
+    } else if (typeof since === 'object') {
+      mode = 'date';
+      for (let i = 0; i < chronological.length; i += 1) {
+        if (chronological[i]!.date <= since.after) cutAfter = i;
+      }
     }
-    const open = chronological.slice(lastZero + 1);
-    const settledOn = lastZero >= 0 ? chronological[lastZero]!.date : null;
+
+    const open = chronological.slice(cutAfter + 1);
+    const closed = chronological.slice(0, cutAfter + 1);
+    const broughtForward = closed.reduce((acc, c) => acc + c.amount, 0);
+    const settledOn = cutAfter >= 0 ? chronological[cutAfter]!.date : null;
 
     const expenses = open.filter((c) => c.kind === 'expense');
     const payments = open.filter((c) => c.kind === 'payment');
@@ -111,13 +153,15 @@ export function explainBalance(meId: number, counterpartyId: number, expenses: S
       meId,
       counterpartyId,
       currency,
-      net: sum(open),
+      net: broughtForward + sum(open),
       charged: sum(expenses),
       settled: sum(payments),
+      broughtForward,
       expenseCount: expenses.length,
       paymentCount: payments.length,
       settledOn,
-      closedCount: lastZero + 1,
+      since: mode,
+      closedCount: cutAfter + 1,
       contributions: open.sort((a, b) => b.date.localeCompare(a.date)),
     };
   });

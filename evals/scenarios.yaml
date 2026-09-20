@@ -17,7 +17,36 @@
     structured.balances.0.settled: "0.00"
     structured.balances.0.remaining: "61.00"
     structured.balances.0.direction: they_owe_you
-    text_includes: ["Priya S owes you 61.00 EUR", "across 2 expenses", "Dinner at Cervejaria", "Airbnb"]
+    structured.balances.0.contributions.0.share_percent: 33.3
+    text_includes: ["Priya S owes you 61.00 EUR", "across 2 expenses", "Dinner at Cervejaria", "(33.3% of 84.00)"]
+
+- id: explain-since-last-payment
+  prompt: "What has Sam racked up since he last paid me?"
+  tool: explain_balance
+  args: { group_id: 100, friend: "Sam", since: last_payment }
+  expect:
+    isError: false
+    structured.balances.0.since: last_payment
+    structured.balances.0.brought_forward: "20.00"
+    text_includes: ["Sam K already owed", "since the payment on 2026-09-06"]
+
+- id: explain-since-date
+  prompt: "Explain what Priya owes me since the 4th of September"
+  tool: explain_balance
+  args: { group_id: 100, friend: "Priya", since: "2026-09-04" }
+  expect:
+    isError: false
+    structured.balances.0.since: date
+    structured.balances.0.brought_forward: "33.00"
+    structured.balances.0.remaining: "61.00"
+
+- id: explain-bad-window
+  prompt: "Explain Sam's balance since whenever"
+  tool: explain_balance
+  args: { group_id: 100, friend: "Sam", since: "whenever" }
+  expect:
+    isError: true
+    text_includes: ["is not a window"]
 
 - id: explain-group
   model: true
@@ -29,7 +58,7 @@
     isError: false
     structured.balances.length: 2
     structured.balances.0.contributions.length: 0
-    text_includes: ["Ask about one person to see the expenses behind their number."]
+    text_includes: ["Ask about one person to see them."]
 
 - id: ambiguous-name
   model: true

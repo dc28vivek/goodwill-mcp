@@ -35,7 +35,8 @@ Your key stays on your machine. Nothing is sent anywhere except Splitwise's own 
 ## What you can ask it
 
 - *"How much do I owe overall, and how much is owed to me?"*
-- *"Why do I owe Priya 61?"* — what you were charged, what you've paid back, what's left
+- *"Why do I owe Priya 61?"* — every expense with its total and your share of it
+- *"What has Sam run up since he last paid me?"* — or since you last settled, or since a date
 - *"Here's my card statement — which of these aren't in Splitwise yet?"*
 - *"Any duplicate expenses in the Lisbon group?"*
 - *"Who's more than 30 days late paying me back?"*
@@ -50,7 +51,7 @@ Twelve tools, three resources, one prompt:
 
 | Tool | What it does | Writes? |
 |---|---|---|
-| `explain_balance` | Charged, paid back, and what's left, with the expenses behind it | no |
+| `explain_balance` | Charged, paid back, what's left, and every expense with your share of it | no |
 | `overall_balances` | Everything you owe and are owed, across every group | no |
 | `find_missing_expenses` | Which card transactions haven't been added to Splitwise yet | no |
 | `stale_balances` | Who is late, by how long | no |

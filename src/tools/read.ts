@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { type Transaction, findDuplicateClusters, findMissingExpenses, payerOf, toExpenseLike } from '../domain/dedupe.js';
-import { explainBalance } from '../domain/explain.js';
+import { type SinceMode, explainBalance } from '../domain/explain.js';
 import { fromMinor, toMinor } from '../domain/money.js';
 import { overallPosition } from '../domain/position.js';
 import { settlePlan } from '../domain/settle.js';
@@ -32,16 +32,31 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       inputSchema: z.object({
         group_id: z.number().int().optional().describe('Splitwise group id. See the splitwise://groups resource.'),
         friend: z.string().optional().describe('A member name ("Priya"), full name, or user id.'),
+        since: z
+          .string()
+          .default('last_settled')
+          .describe(
+            'Where to explain from. "last_settled" (default) starts after the balance last stood at zero. "last_payment" starts after the most recent payment of any size. "all" shows everything. A date like "2026-06-01" starts after that day. Anything left out is summarised as brought_forward, so the balance is the same either way.',
+          ),
       }),
       outputSchema: ExplainOutput,
       annotations: READ,
     },
-    timed(deps.metrics, 'explain_balance', async ({ group_id, friend }, ctx) => {
+    timed(deps.metrics, 'explain_balance', async ({ group_id, friend, since }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const me = await deps.me();
       if (group_id === undefined && !friend) {
         return fail('Give a group_id, a friend, or both. Read splitwise://groups to see group ids and members.');
+      }
+
+      let sinceMode: SinceMode;
+      if (since === 'last_settled' || since === 'last_payment' || since === 'all') {
+        sinceMode = since;
+      } else if (/^\d{4}-\d{2}-\d{2}/.test(since) && !Number.isNaN(Date.parse(since))) {
+        sinceMode = { after: since.length === 10 ? `${since}T23:59:59Z` : since };
+      } else {
+        return fail(`"${since}" is not a window. Use "last_settled", "last_payment", "all", or a date like "2026-06-01".`);
       }
 
       let counterparties: SwUser[];
@@ -64,30 +79,38 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         expenses = (await deps.client.allExpenses({ friend_id: r.user.id })).filter((e) => e.group_id === null || e.group_id === 0);
       }
 
-      // A whole-group answer lists every member. Including each person's full
-      // expense history turns that into hundreds of lines of context for a
-      // question nobody asked. Detail is for a single counterparty.
-      const oneCounterparty = counterparties.length === 1;
+      // Listing the expenses is the point of explaining a balance, so detail is
+      // the default. It only gets dropped when the answer covers so many people
+      // that the list would run to hundreds of lines and help nobody: a
+      // 24-member group asked about as a whole. Ask about one person to get it
+      // back.
+      const DETAIL_LIMIT = 3;
       const MAX_CONTRIBUTIONS = 20;
+      const oneCounterparty = counterparties.length <= DETAIL_LIMIT;
       const balances = counterparties.flatMap((cp) =>
-        explainBalance(me.id, cp.id, expenses).map((b) => ({
+        explainBalance(me.id, cp.id, expenses, sinceMode).map((b) => ({
           counterparty: person(cp),
           currency: b.currency,
           direction: direction(b.net),
+          brought_forward: fromMinor(Math.abs(b.broughtForward)),
           charged: fromMinor(Math.abs(b.charged)),
           settled: fromMinor(Math.abs(b.settled)),
           remaining: fromMinor(Math.abs(b.net)),
           expense_count: b.expenseCount,
           payment_count: b.paymentCount,
-          settled_on: b.settledOn ? b.settledOn.slice(0, 10) : null,
+          since: b.since,
+          opens_after: b.settledOn ? b.settledOn.slice(0, 10) : null,
           closed_count: b.closedCount,
           charged_raw: b.charged,
           settled_raw: b.settled,
+          brought_raw: b.broughtForward,
           contributions: (oneCounterparty ? b.contributions.slice(0, MAX_CONTRIBUTIONS) : []).map((c) => ({
             expense_id: c.expenseId,
             description: untrusted(c.description),
             date: c.date.slice(0, 10),
             amount: fromMinor(c.amount),
+            total: fromMinor(c.total),
+            share_percent: c.kind === 'payment' || c.total === 0 ? null : Math.round((Math.abs(c.amount) / c.total) * 1000) / 10,
             kind: c.kind,
           })),
         })),
@@ -108,6 +131,9 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         // Label by what actually happened. A payment does not always reduce a
         // debt: one with no expenses behind it creates the debt instead.
         const rows: [string, string, string][] = [];
+        if (b.brought_raw !== 0) {
+          rows.push([b.brought_raw > 0 ? `${who} already owed` : 'You already owed', b.brought_forward, `carried forward from ${b.closed_count} earlier ${b.closed_count === 1 ? 'item' : 'items'}`]);
+        }
         if (b.expense_count > 0) {
           rows.push([b.charged_raw > 0 ? `${who} was charged` : 'You were charged', b.charged, `across ${plural(b.expense_count, 'expense')}`]);
         }
@@ -120,14 +146,26 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         const statement = rows.map(
           ([label, amount, note]) => `  ${label.padEnd(labelWidth)}  ${amount.padStart(amountWidth)} ${b.currency}${note ? `  ${note}` : ''}`,
         );
-        const since = b.settled_on ? `  (since you settled up on ${b.settled_on}; ${b.closed_count} earlier items are closed)` : '';
-        if (!oneCounterparty) return [head + since, ...statement].join('\n');
-        const items = b.contributions.map((c) => `  ${c.date}  ${c.amount.padStart(9)}  ${c.kind === 'payment' ? '(payment) ' : ''}${c.description}`);
+        const why =
+          b.since === 'last_settled'
+            ? `since you settled up on ${b.opens_after}`
+            : b.since === 'last_payment'
+              ? `since the payment on ${b.opens_after}`
+              : `since ${b.opens_after}`;
+        const windowNote = b.opens_after ? `  (${why}; ${b.closed_count} earlier ${b.closed_count === 1 ? 'item' : 'items'} summarised above)` : '';
+        if (!oneCounterparty) return [head + windowNote, ...statement].join('\n');
+        const items = b.contributions.map((c) => {
+          const of = c.kind === 'payment' ? '' : `  (${c.share_percent}% of ${c.total})`;
+          return `  ${c.date}  ${c.amount.padStart(9)}  ${c.kind === 'payment' ? '(payment) ' : ''}${c.description}${of}`;
+        });
         const more = b.expense_count + b.payment_count - items.length;
-        return [head + since, ...statement, '', ...items, ...(more > 0 ? [`  ... and ${more} older items`] : [])].join('\n');
+        return [head + windowNote, ...statement, '', ...items, ...(more > 0 ? [`  ... and ${more} older items`] : [])].join('\n');
       });
-      const footer = oneCounterparty || balances.length === 0 ? '' : '\n\nAsk about one person to see the expenses behind their number.';
-      const structured = balances.map(({ charged_raw: _c, settled_raw: _s, ...rest }) => rest);
+      const footer =
+        oneCounterparty || balances.length === 0
+          ? ''
+          : `\n\n${balances.length} people, so the expenses behind each number are left out. Ask about one person to see them.`;
+      const structured = balances.map(({ charged_raw: _c, settled_raw: _s, brought_raw: _b, ...rest }) => rest);
       return ok(lines.length ? `${lines.join('\n\n')}${footer}` : 'No shared expenses found.', { me: person(me), balances: structured });
     }),
   );

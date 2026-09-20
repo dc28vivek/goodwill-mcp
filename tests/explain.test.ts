@@ -106,3 +106,71 @@ describe('only since the last settled point', () => {
     expect(eur?.net).toBe(-4528);
   });
 });
+
+describe('choosing where the window opens', () => {
+  const pay = (date: string, amount: string) =>
+    expense({ description: 'Payment', cost: amount, payment: true, date, users: [
+      { user: { id: PRIYA.id, first_name: PRIYA.first_name, last_name: PRIYA.last_name }, user_id: PRIYA.id, paid_share: amount, owed_share: '0', net_balance: amount },
+      { user: { id: ME.id, first_name: ME.first_name, last_name: ME.last_name }, user_id: ME.id, paid_share: '0', owed_share: amount, net_balance: `-${amount}` },
+    ] });
+  const charge = (date: string, amount: string, description: string) =>
+    expense({ description, cost: amount, date, users: [
+      { user: { id: ME.id, first_name: ME.first_name, last_name: ME.last_name }, user_id: ME.id, paid_share: amount, owed_share: '0', net_balance: amount },
+      { user: { id: PRIYA.id, first_name: PRIYA.first_name, last_name: PRIYA.last_name }, user_id: PRIYA.id, paid_share: '0', owed_share: amount, net_balance: `-${amount}` },
+    ] });
+
+  // Settled clean, then charges, then a partial payment, then another charge.
+  const history = [
+    charge('2024-01-10T12:00:00Z', '100.00', 'Old dinner'),
+    pay('2024-02-01T12:00:00Z', '100.00'),
+    charge('2026-06-01T12:00:00Z', '50.00', 'Flights'),
+    charge('2026-07-01T12:00:00Z', '30.00', 'Hotel'),
+    pay('2026-08-01T12:00:00Z', '20.00'),
+    charge('2026-09-01T12:00:00Z', '10.00', 'Lunch'),
+  ];
+
+  it('defaults to the last full settlement and carries nothing forward', () => {
+    const [b] = explainBalance(ME.id, PRIYA.id, history);
+    expect(b?.since).toBe('last_settled');
+    expect(b?.broughtForward).toBe(0);
+    expect(b?.charged).toBe(9000);
+    expect(b?.settled).toBe(-2000);
+    expect(b?.net).toBe(7000);
+    expect(b?.contributions).toHaveLength(4);
+  });
+
+  it('can open after the last payment, carrying the unpaid remainder forward', () => {
+    const [b] = explainBalance(ME.id, PRIYA.id, history, 'last_payment');
+    expect(b?.since).toBe('last_payment');
+    // 50 + 30 charged, 20 paid, leaving 60 owed when the window opens.
+    expect(b?.broughtForward).toBe(6000);
+    expect(b?.charged).toBe(1000);
+    expect(b?.paymentCount).toBe(0);
+    expect(b?.net).toBe(7000);
+    expect(b?.contributions.map((c) => c.description)).toEqual(['Lunch']);
+  });
+
+  it('can open from a date', () => {
+    const [b] = explainBalance(ME.id, PRIYA.id, history, { after: '2026-06-30' });
+    expect(b?.since).toBe('date');
+    expect(b?.broughtForward).toBe(5000);
+    expect(b?.charged).toBe(4000);
+    expect(b?.net).toBe(7000);
+  });
+
+  it('can show the whole history', () => {
+    const [b] = explainBalance(ME.id, PRIYA.id, history, 'all');
+    expect(b?.since).toBe('all');
+    expect(b?.broughtForward).toBe(0);
+    expect(b?.contributions).toHaveLength(6);
+    expect(b?.net).toBe(7000);
+  });
+
+  it('reports the same true balance whichever window is chosen', () => {
+    for (const mode of ['last_settled', 'last_payment', 'all', { after: '2026-06-30' }] as const) {
+      const [b] = explainBalance(ME.id, PRIYA.id, history, mode);
+      expect(b?.net).toBe(7000);
+      expect(b?.net).toBe((b?.broughtForward ?? 0) + (b?.charged ?? 0) + (b?.settled ?? 0));
+    }
+  });
+});

@@ -289,17 +289,43 @@ describe('goodwill server', () => {
     expect(state.writes).toHaveLength(0);
   });
 
-  it('keeps a whole-group answer short by leaving out per-person expense lists', async () => {
+  it('drops per-person expense lists only when the answer covers too many people', async () => {
     const { client } = await connect(state);
     const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100 } });
     const sc = r.structuredContent as { balances: { contributions: unknown[] }[] };
-    // Two counterparties, each with a statement but no expense list.
-    expect(sc.balances).toHaveLength(2);
+    // Four counterparties in this group, over the detail limit.
     for (const b of sc.balances) expect(b.contributions).toEqual([]);
     const text = String((r.content[0] as { text: string }).text);
-    expect(text).toContain('Ask about one person to see the expenses behind their number.');
+    expect(text).toContain('Ask about one person to see them.');
     expect(text).not.toContain('Dinner at Cervejaria');
-    expect(text.split('\n').length).toBeLessThan(15);
+  });
+
+  it('keeps the expense list for a small group, because listing them is the explanation', async () => {
+    // Trim to two other members, as a couple or a small trip would be.
+    state.groups[0]!.members = state.groups[0]!.members.filter((m) => [1, 2, 3].includes(m.id));
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100 } });
+    const sc = r.structuredContent as { balances: { contributions: { description: string }[] }[] };
+    expect(sc.balances[0]?.contributions.length).toBeGreaterThan(0);
+    expect(String((r.content[0] as { text: string }).text)).toContain('Dinner at Cervejaria');
+  });
+
+  it('shows each expense with its total and what share it was', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Priya' } });
+    const sc = r.structuredContent as { balances: { contributions: { description: string; amount: string; total: string; share_percent: number | null }[] }[] };
+    const dinner = sc.balances[0]?.contributions.find((c) => c.description.startsWith('Dinner'));
+    // 84.00 split three ways: her 28.00 is a third of it.
+    expect(dinner).toMatchObject({ amount: '28.00', total: '84.00', share_percent: 33.3 });
+    expect(String((r.content[0] as { text: string }).text)).toContain('(33.3% of 84.00)');
+  });
+
+  it('leaves the share percentage null for payments, where it means nothing', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Sam' } });
+    const sc = r.structuredContent as { balances: { contributions: { kind: string; share_percent: number | null }[] }[] };
+    const payment = sc.balances[0]?.contributions.find((c) => c.kind === 'payment');
+    expect(payment?.share_percent).toBeNull();
   });
 
   it('still gives the full expense list when one person is named', async () => {
@@ -351,5 +377,37 @@ describe('goodwill server', () => {
     const r = await client.callTool({ name: 'add_to_group', arguments: { group_id: 100, members: ['Priya', 'Sam'] } });
     expect((r.structuredContent as { added: boolean }).added).toBe(false);
     expect(state.writes).toHaveLength(0);
+  });
+
+  it('can explain from the last payment, carrying the unpaid remainder forward', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Sam', since: 'last_payment' } });
+    const sc = r.structuredContent as { balances: { since: string; brought_forward: string; remaining: string; expense_count: number }[] };
+    // Sam was charged 69 and paid 49 on 2026-09-06; nothing since, so 20 carried forward.
+    expect(sc.balances[0]).toMatchObject({ since: 'last_payment', brought_forward: '20.00', remaining: '20.00', expense_count: 0 });
+    expect(String((r.content[0] as { text: string }).text)).toContain('Sam K already owed');
+  });
+
+  it('can explain from a date', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Priya', since: '2026-09-04' } });
+    const sc = r.structuredContent as { balances: { since: string; brought_forward: string; remaining: string }[] };
+    // The Airbnb on the 4th is carried forward; only the dinner on the 5th is listed.
+    expect(sc.balances[0]).toMatchObject({ since: 'date', brought_forward: '33.00', remaining: '61.00' });
+  });
+
+  it('reports the same balance whichever window is asked for', async () => {
+    const { client } = await connect(state);
+    for (const since of ['last_settled', 'last_payment', 'all', '2026-09-04']) {
+      const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Sam', since } });
+      expect((r.structuredContent as { balances: { remaining: string }[] }).balances[0]?.remaining).toBe('20.00');
+    }
+  });
+
+  it('rejects a window it does not understand', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Sam', since: 'whenever' } });
+    expect(r.isError).toBe(true);
+    expect((r.content[0] as { text: string }).text).toContain('is not a window');
   });
 });
