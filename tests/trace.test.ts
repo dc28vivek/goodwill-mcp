@@ -15,7 +15,7 @@ function spansOf(payload: unknown): Array<{ name: string; attributes: Array<{ ke
   return p.resourceSpans[0]!.scopeSpans[0]!.spans;
 }
 
-const base = (fn: typeof fetch) => ({ endpoint: 'https://collector.example', fetch: fn, serviceName: 'goodwill-mcp', serviceVersion: '0.1.0' });
+const base = (fn: typeof fetch) => ({ endpoint: 'https://collector.example', fetch: fn, serviceName: 'splittab-mcp', serviceVersion: '0.1.0' });
 
 describe('OtlpTracer', () => {
   it('appends the traces path and posts OTLP JSON', async () => {

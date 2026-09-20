@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "goodwill-mcp",
+  "name": "splittab-mcp",
   "main": "src/worker.ts",
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
@@ -22,7 +22,7 @@
   // `wrangler secret put ALLOWED_EMAILS`. The code reads env.ALLOWED_EMAILS
   // either way. Keeping it here would also clobber the secret on every deploy.
   "vars": {
-    "PUBLIC_HOST": "goodwill-mcp.dc28vivek.workers.dev",
+    "PUBLIC_HOST": "splittab-mcp.dc28vivek.workers.dev",
     "ENVIRONMENT": "production",
     // Leave the endpoint empty to run without tracing. Any OTLP/HTTP collector
     // works: Honeycomb, Grafana Cloud, Baselime, a self-hosted collector.
@@ -32,7 +32,7 @@
   "observability": { "enabled": true }
 }
 // Secrets (set with `wrangler secret put <NAME>`), never in this file:
-//   SPLITWISE_CLIENT_ID, SPLITWISE_CLIENT_SECRET, GOODWILL_STATE_KEY,
+//   SPLITWISE_CLIENT_ID, SPLITWISE_CLIENT_SECRET, SPLITTAB_STATE_KEY,
 //   OTEL_EXPORTER_OTLP_HEADERS
 // Create the KV namespace with `wrangler kv namespace create OAUTH_KV` and
 // paste the id above. The Durable Object needs no setup beyond the migration.

@@ -22,7 +22,7 @@ const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: fal
  * person confirming it: the people whose balances moved should be able to tell
  * where the change came from.
  */
-const SIGNATURE = 'Added by Goodwill MCP.';
+const SIGNATURE = 'Added by Splittab MCP.';
 
 /**
  * Post the trail comment. Never fails the write: the expense already exists by
@@ -152,7 +152,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     {
       title: 'Add an expense',
       description:
-        'Add a shared expense to a group from a sentence ("dinner 84, I paid, split with everyone") or from explicit fields. Step 1 returns a preview naming everyone whose balance changes and asks for confirmation. Nothing is posted until the user confirms. Checks for likely duplicates first. Equal split only in this version; give participants to limit who shares it. Posts a comment on the expense noting that Goodwill MCP created it, so the group can see where it came from.',
+        'Add a shared expense to a group from a sentence ("dinner 84, I paid, split with everyone") or from explicit fields. Step 1 returns a preview naming everyone whose balance changes and asks for confirmation. Nothing is posted until the user confirms. Checks for likely duplicates first. Equal split only in this version; give participants to limit who shares it. Posts a comment on the expense noting that Splittab MCP created it, so the group can see where it came from.',
       inputSchema: z.object({
         group_id: z.number().int().describe('Group to post into. See splitwise://groups.'),
         text: z.string().max(300).optional().describe('A sentence like "taxi 16 paid by Sam split with me and Sam".'),
@@ -335,7 +335,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     {
       title: 'Correct an expense',
       description:
-        'Fix an expense that is already in Splitwise: a wrong amount, a typo in the description, the wrong date or category. Other people have already seen it, so the preview shows the current values next to the new ones and what each person\'s share becomes. Changing the cost keeps the split everyone agreed to, rescaled in proportion. It posts a comment saying what was corrected and that Goodwill MCP did it. This cannot add or remove people, change who paid, or turn an expense into a payment; do those in the Splitwise app.',
+        'Fix an expense that is already in Splitwise: a wrong amount, a typo in the description, the wrong date or category. Other people have already seen it, so the preview shows the current values next to the new ones and what each person\'s share becomes. Changing the cost keeps the split everyone agreed to, rescaled in proportion. It posts a comment saying what was corrected and that Splittab MCP did it. This cannot add or remove people, change who paid, or turn an expense into a payment; do those in the Splitwise app.',
       inputSchema: z.object({
         expense_id: z.number().int().describe('From list_expenses or read_expense.'),
         description: z.string().max(120).optional(),
@@ -739,7 +739,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     {
       title: 'Split a receipt by item',
       description:
-        'Split a bill line by line instead of equally, so everyone pays for what they ordered. Read the receipt yourself (from a photo, a PDF or text the user pasted) and pass the lines in as `items`, each with who shares it. Tax and tip are allocated in proportion to what each person ordered, not split equally. Pass `total` from the receipt and the tool will refuse to post if the lines do not add up, which catches a misread photo before it becomes five wrong balances. Shows a preview and waits for confirmation, and posts a comment noting that Goodwill MCP created it.',
+        'Split a bill line by line instead of equally, so everyone pays for what they ordered. Read the receipt yourself (from a photo, a PDF or text the user pasted) and pass the lines in as `items`, each with who shares it. Tax and tip are allocated in proportion to what each person ordered, not split equally. Pass `total` from the receipt and the tool will refuse to post if the lines do not add up, which catches a misread photo before it becomes five wrong balances. Shows a preview and waits for confirmation, and posts a comment noting that Splittab MCP created it.',
       inputSchema: z.object({
         group_id: z.number().int(),
         description: z.string().max(120).describe('What the bill was, e.g. "Dinner at Cervejaria".'),
@@ -928,7 +928,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     {
       title: 'Record a payment',
       description:
-        'Record that money changed hands, so the balance closes in Splitwise. Use this after you actually paid someone (or they paid you) through Venmo, UPI, a bank transfer or cash. Defaults to the full outstanding balance. Shows a preview and waits for confirmation. This does not move money; it records a payment that already happened. Posts a comment noting that Goodwill MCP recorded it.',
+        'Record that money changed hands, so the balance closes in Splitwise. Use this after you actually paid someone (or they paid you) through Venmo, UPI, a bank transfer or cash. Defaults to the full outstanding balance. Shows a preview and waits for confirmation. This does not move money; it records a payment that already happened. Posts a comment noting that Splittab MCP recorded it.',
       inputSchema: z.object({
         friend: z.string().describe('Member name or id.'),
         amount: z.string().optional().describe('Decimal string like "61.00". Defaults to the full outstanding balance with this person.'),

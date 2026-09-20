@@ -18,7 +18,7 @@ if (!token) {
 }
 const port = Number(process.env.PORT ?? 3000);
 const baseUrl = process.env.SPLITWISE_API_BASE;
-const stateKey = process.env.GOODWILL_STATE_KEY ?? randomStateKey();
+const stateKey = process.env.SPLITTAB_STATE_KEY ?? randomStateKey();
 const writeLog = new MemoryWriteLog();
 const deps = createDeps({ token, stateKey, writeLog, ...(baseUrl ? { baseUrl } : {}) });
 
@@ -32,7 +32,7 @@ const validateOrigin = localhostOriginValidation();
 createServer((req, res) => {
   if (req.url === '/health') {
     res.writeHead(200, { 'content-type': 'application/json' });
-    res.end(JSON.stringify({ ok: true, name: 'goodwill-mcp' }));
+    res.end(JSON.stringify({ ok: true, name: 'splittab-mcp' }));
     return;
   }
   if (!validateHost(req, res) || !validateOrigin(req, res)) return;
@@ -41,5 +41,5 @@ createServer((req, res) => {
   // runtime shape is the same. See build-log.
   void nodeHandler(req as unknown as Parameters<typeof nodeHandler>[0], res);
 }).listen(port, '127.0.0.1', () => {
-  process.stderr.write(`goodwill-mcp: http://127.0.0.1:${port}/mcp\n`);
+  process.stderr.write(`splittab-mcp: http://127.0.0.1:${port}/mcp\n`);
 });

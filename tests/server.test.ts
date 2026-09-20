@@ -5,7 +5,7 @@ import { createDeps } from '../src/server/env.js';
 import { memoryMetrics } from '../src/server/metrics.js';
 import { fakeFetch, makeState, type FakeState } from './fixtures/fakeSplitwise.js';
 
-const STATE_KEY = 'goodwill-test-key-0123456789abcdef0123456789';
+const STATE_KEY = 'splittab-test-key-0123456789abcdef0123456789';
 
 async function connect(state: FakeState, answer: boolean | 'decline' = true) {
   const metrics = memoryMetrics();
@@ -23,7 +23,7 @@ async function connect(state: FakeState, answer: boolean | 'decline' = true) {
   return { client, server, prompts, deps, metrics };
 }
 
-describe('goodwill server', () => {
+describe('splittab server', () => {
   let state: FakeState;
   beforeEach(() => {
     state = makeState();
@@ -615,10 +615,10 @@ describe('goodwill server', () => {
   it('leaves a trail comment on an expense it creates', async () => {
     const { client, prompts } = await connect(state, true);
     await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'coffee 10, I paid, split with me, Priya and Sam' } });
-    expect(prompts[0]).toContain('It will carry a comment saying Added by Goodwill MCP');
+    expect(prompts[0]).toContain('It will carry a comment saying Added by Splittab MCP');
     const comment = state.comments.at(-1);
     expect(comment?.content).toContain('coffee, 10.00 EUR');
-    expect(comment?.content.endsWith('Added by Goodwill MCP.')).toBe(true);
+    expect(comment?.content.endsWith('Added by Splittab MCP.')).toBe(true);
   });
 
   it('says what it corrected in the trail comment', async () => {
@@ -627,7 +627,7 @@ describe('goodwill server', () => {
     await client.callTool({ name: 'update_expense', arguments: { expense_id: dinner.id, cost: '90.00' } });
     const comment = state.comments.at(-1);
     expect(comment?.content).toContain('Corrected: cost 84.00 to 90.00');
-    expect(comment?.content.endsWith('Added by Goodwill MCP.')).toBe(true);
+    expect(comment?.content.endsWith('Added by Splittab MCP.')).toBe(true);
   });
 
   it('signs a recorded payment too', async () => {

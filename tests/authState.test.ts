@@ -83,13 +83,13 @@ describe('browser binding', () => {
   });
 
   it('reads one cookie out of a header and ignores the rest', () => {
-    expect(readCookie('gw_state=xyz', 'gw_state')).toBe('xyz');
-    expect(readCookie('other=1; gw_state=xyz; more=2', 'gw_state')).toBe('xyz');
-    expect(readCookie('other=1', 'gw_state')).toBeUndefined();
-    expect(readCookie(null, 'gw_state')).toBeUndefined();
-    expect(readCookie('', 'gw_state')).toBeUndefined();
+    expect(readCookie('st_state=xyz', 'st_state')).toBe('xyz');
+    expect(readCookie('other=1; st_state=xyz; more=2', 'st_state')).toBe('xyz');
+    expect(readCookie('other=1', 'st_state')).toBeUndefined();
+    expect(readCookie(null, 'st_state')).toBeUndefined();
+    expect(readCookie('', 'st_state')).toBeUndefined();
     // A name that merely ends with the one we want must not match.
-    expect(readCookie('not_gw_state=wrong', 'gw_state')).toBeUndefined();
+    expect(readCookie('not_st_state=wrong', 'st_state')).toBeUndefined();
   });
 
   it('a state stolen from another browser does not verify', async () => {
@@ -107,7 +107,7 @@ describe('browser binding', () => {
     expect(safeEqual(await bindingDigest(attackerBinding), out.payload.bind)).toBe(false);
 
     // And with no cookie at all there is nothing to compare, so it is refused.
-    expect(readCookie(null, 'gw_state')).toBeUndefined();
+    expect(readCookie(null, 'st_state')).toBeUndefined();
 
     // Only the browser that started the flow gets through.
     expect(safeEqual(await bindingDigest(victimBinding), out.payload.bind)).toBe(true);

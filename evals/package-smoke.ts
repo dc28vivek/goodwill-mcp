@@ -30,7 +30,7 @@ async function waitFor(url: string): Promise<void> {
 
 async function main() {
   const checks: [string, boolean, string][] = [];
-  const dir = mkdtempSync(join(tmpdir(), 'goodwill-pkg-'));
+  const dir = mkdtempSync(join(tmpdir(), 'splittab-pkg-'));
   const fake = spawn('npx', ['tsx', 'evals/fake-splitwise-server.ts'], { cwd: repo, env: { ...process.env, FAKE_SPLITWISE_PORT: String(FAKE_PORT) }, stdio: 'ignore' });
   const cleanup = () => {
     fake.kill();
@@ -46,7 +46,7 @@ async function main() {
 
     await waitFor(`http://127.0.0.1:${FAKE_PORT}/get_currencies`);
 
-    const bin = join(dir, 'node_modules', '.bin', 'goodwill-mcp');
+    const bin = join(dir, 'node_modules', '.bin', 'splittab-mcp');
     const client = new Client({ name: 'package-smoke', version: '0.0.0' }, { capabilities: { elicitation: { form: {} } } });
     client.setRequestHandler('elicitation/create', async () => ({ action: 'decline' as const }));
     const transport = new StdioClientTransport({
@@ -55,13 +55,13 @@ async function main() {
         PATH: process.env.PATH ?? '',
         SPLITWISE_API_KEY: 'test-token',
         SPLITWISE_API_BASE: `http://127.0.0.1:${FAKE_PORT}/api/v3.0`,
-        GOODWILL_STATE_KEY: 'goodwill-package-smoke-key-0123456789abcdef',
+        SPLITTAB_STATE_KEY: 'splittab-package-smoke-key-0123456789abcdef',
       },
     });
     await client.connect(transport);
 
     const info = client.getServerVersion();
-    checks.push(['server identifies itself', info?.name === 'goodwill-mcp', `name=${info?.name}`]);
+    checks.push(['server identifies itself', info?.name === 'splittab-mcp', `name=${info?.name}`]);
 
     const { tools } = await client.listTools();
     checks.push(['fifteen tools listed', tools.length === 15, tools.map((t) => t.name).join(', ')]);

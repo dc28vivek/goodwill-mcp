@@ -59,7 +59,7 @@ export class WorkersCache implements TtlCache {
   constructor(private readonly cache: CacheLike) {}
 
   private req(key: string): Request {
-    return new Request(`https://cache.goodwill.invalid/${encodeURIComponent(key)}`);
+    return new Request(`https://cache.splittab.invalid/${encodeURIComponent(key)}`);
   }
 
   async get(key: string): Promise<string | undefined> {

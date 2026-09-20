@@ -22,7 +22,7 @@ interface Scenario {
   args: Record<string, unknown>;
   model?: boolean;
   model_args_include?: Record<string, unknown>;
-  /** If no goodwill tool is called, pass when the final answer includes any of these. */
+  /** If no splittab tool is called, pass when the final answer includes any of these. */
   model_accept_final_includes_any?: string[];
 }
 
@@ -54,12 +54,12 @@ function runClaude(prompt: string, mcpConfig: string): Promise<Run> {
   return new Promise((resolve) => {
     const args = [
       '-p',
-      `${prompt}\n\nUse the goodwill tools. Answer in two sentences.`,
+      `${prompt}\n\nUse the splittab tools. Answer in two sentences.`,
       '--mcp-config',
       mcpConfig,
       '--strict-mcp-config',
       '--allowedTools',
-      'mcp__goodwill__*',
+      'mcp__splittab__*',
       '--output-format',
       'stream-json',
       '--verbose',
@@ -86,7 +86,7 @@ function runClaude(prompt: string, mcpConfig: string): Promise<Run> {
             for (const b of j.message?.content ?? []) {
               if (b.type !== 'tool_use' || !b.name) continue;
               allTools.push(b.name);
-              if (b.name.startsWith('mcp__goodwill__')) toolCalls.push({ name: b.name.replace('mcp__goodwill__', ''), input: b.input ?? {} });
+              if (b.name.startsWith('mcp__splittab__')) toolCalls.push({ name: b.name.replace('mcp__splittab__', ''), input: b.input ?? {} });
             }
           if (j.type === 'result') final = j.result ?? '';
         } catch {
@@ -111,19 +111,19 @@ function includes(actual: Record<string, unknown>, expected: Record<string, unkn
 async function main() {
   const scenarios = (parse(readFileSync(new URL('./scenarios.yaml', import.meta.url), 'utf8')) as Scenario[]).filter((s) => s.model);
   const only = process.argv[2];
-  const dir = mkdtempSync(join(tmpdir(), 'goodwill-model-'));
+  const dir = mkdtempSync(join(tmpdir(), 'splittab-model-'));
   const mcpConfig = join(dir, 'mcp.json');
   writeFileSync(
     mcpConfig,
     JSON.stringify({
       mcpServers: {
-        goodwill: {
+        splittab: {
           command: 'npx',
           args: ['tsx', join(process.cwd(), 'src/bin/stdio.ts')],
           env: {
             SPLITWISE_API_KEY: 'test-token',
             SPLITWISE_API_BASE: `http://127.0.0.1:${FAKE_PORT}/api/v3.0`,
-            GOODWILL_STATE_KEY: 'goodwill-modelrun-key-0123456789abcdef0123456789',
+            SPLITTAB_STATE_KEY: 'splittab-modelrun-key-0123456789abcdef0123456789',
           },
         },
       },
@@ -144,7 +144,7 @@ async function main() {
     const finalOk = (s.model_accept_final_includes_any ?? []).some((w) => run.final.toLowerCase().includes(w.toLowerCase()));
     if (!first && finalOk) {
       // The model asked the person instead of calling the tool. Accepted outcome.
-    } else if (!first) problems.push(`no goodwill tool was called. tools seen: ${run.allTools.join(', ') || 'none'}. exit ${run.exit}. final: ${run.final.slice(0, 160)}`);
+    } else if (!first) problems.push(`no splittab tool was called. tools seen: ${run.allTools.join(', ') || 'none'}. exit ${run.exit}. final: ${run.final.slice(0, 160)}`);
     else {
       if (first.name !== s.tool) problems.push(`first tool was ${first.name}, expected ${s.tool}`);
       problems.push(...includes(first.input, s.model_args_include ?? s.args));

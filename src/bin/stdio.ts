@@ -14,7 +14,7 @@ if (!token) {
 
 // One process serves one user, so a per-process key, log, cache and budget
 // are all the coordination this deployment needs.
-const stateKey = process.env.GOODWILL_STATE_KEY ?? randomStateKey();
+const stateKey = process.env.SPLITTAB_STATE_KEY ?? randomStateKey();
 const writeLog = new MemoryWriteLog();
 const baseUrl = process.env.SPLITWISE_API_BASE;
 const deps = createDeps({
@@ -27,4 +27,4 @@ const deps = createDeps({
 });
 
 serveStdio(() => buildServer(deps));
-process.stderr.write('goodwill-mcp: serving over stdio\n');
+process.stderr.write('splittab-mcp: serving over stdio\n');

@@ -17,8 +17,8 @@ Operating notes for the hosted Cloudflare Worker. For local stdio use, the READM
 
 1. Register an app at <https://secure.splitwise.com/apps> with callback `https://<host>/callback`.
 2. `npx wrangler kv namespace create OAUTH_KV`; paste the id into `wrangler.jsonc`. The Durable Object needs nothing beyond the migration already in that file.
-3. `npx wrangler secret put SPLITWISE_CLIENT_ID`, then `SPLITWISE_CLIENT_SECRET`, then `GOODWILL_STATE_KEY` (32+ random characters).
-   `GOODWILL_STATE_KEY` now signs the OAuth state parameter as well as multi round-trip confirmations. Rotating it invalidates logins in flight, which is ten minutes of inconvenience, not a data loss.
+3. `npx wrangler secret put SPLITWISE_CLIENT_ID`, then `SPLITWISE_CLIENT_SECRET`, then `SPLITTAB_STATE_KEY` (32+ random characters).
+   `SPLITTAB_STATE_KEY` now signs the OAuth state parameter as well as multi round-trip confirmations. Rotating it invalidates logins in flight, which is ten minutes of inconvenience, not a data loss.
 4. Set `ALLOWED_EMAILS` and `PUBLIC_HOST` in `wrangler.jsonc`. An empty allowlist means nobody can connect.
 5. `npm run deploy`.
 6. Check `https://<host>/health` returns `{"ok":true}` and `npm run smoke:worker` passes locally.
@@ -68,7 +68,7 @@ Anyone can revoke at **Splitwise > Settings > Apps**, which invalidates their Sp
 
 To revoke from this side, remove the email from `ALLOWED_EMAILS` and redeploy. That stops new logins but does not kill live grants; to do that, delete the grant keys from `OAUTH_KV`.
 
-A Splitwise token is non-expiring and scopeless, so a compromise of `OAUTH_KV` is total and permanent until every grant is deleted. There is no partial answer. The procedure is: delete every `grant:*` key from `OAUTH_KV`, rotate `SPLITWISE_CLIENT_SECRET` at <https://secure.splitwise.com/apps>, rotate `GOODWILL_STATE_KEY`, redeploy, and tell everyone on the allowlist to revoke the app at **Settings > Apps** themselves, because only they can invalidate the upstream token.
+A Splitwise token is non-expiring and scopeless, so a compromise of `OAUTH_KV` is total and permanent until every grant is deleted. There is no partial answer. The procedure is: delete every `grant:*` key from `OAUTH_KV`, rotate `SPLITWISE_CLIENT_SECRET` at <https://secure.splitwise.com/apps>, rotate `SPLITTAB_STATE_KEY`, redeploy, and tell everyone on the allowlist to revoke the app at **Settings > Apps** themselves, because only they can invalidate the upstream token.
 
 ## Things this server deliberately cannot do
 

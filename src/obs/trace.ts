@@ -207,7 +207,7 @@ export class OtlpTracer implements Tracer, Recorder {
 
   startSpan(name: string, kind: SpanKind = SPAN_KIND.server, attrs?: Attrs): Span {
     const parent = this.rootParent ? { traceId: this.traceId, spanId: this.rootParent } : undefined;
-    return this.open(name, kind, { 'service.name': this.opts.serviceName ?? 'goodwill-mcp', ...attrs }, parent);
+    return this.open(name, kind, { 'service.name': this.opts.serviceName ?? 'splittab-mcp', ...attrs }, parent);
   }
 
   open(name: string, kind: SpanKind, attrs: Attrs | undefined, parent?: { traceId: string; spanId: string }): Span {
@@ -232,14 +232,14 @@ export class OtlpTracer implements Tracer, Recorder {
         {
           resource: {
             attributes: [
-              attribute('service.name', this.opts.serviceName ?? 'goodwill-mcp'),
+              attribute('service.name', this.opts.serviceName ?? 'splittab-mcp'),
               attribute('service.version', this.opts.serviceVersion ?? '0.0.0'),
               ...(this.opts.environment ? [attribute('deployment.environment', this.opts.environment)] : []),
             ],
           },
           scopeSpans: [
             {
-              scope: { name: 'goodwill', version: this.opts.serviceVersion ?? '0.0.0' },
+              scope: { name: 'splittab', version: this.opts.serviceVersion ?? '0.0.0' },
               spans: batch.map((s) => ({
                 traceId: s.traceId,
                 spanId: s.spanId,

@@ -1,8 +1,8 @@
-# Goodwill
+# Splittab
 
 **An unofficial Splitwise MCP server.** Ask why you owe what you owe, settle up a trip, add an expense in a sentence, and remind someone without the awkwardness. Every write shows who it affects and waits for your yes. Nothing is ever deleted.
 
-> In accounting, goodwill is the value of a relationship that never appears on the balance sheet. That is what a shared-expense app is actually protecting. The ledger is in service of the goodwill, not the other way round.
+> The tab is the part everyone can see: what was spent, by whom, for whom. The part nobody puts on it is whether the group still likes each other afterwards. A shared-expense app is really in service of the second thing, and the ledger only matters because getting it wrong costs you the friendship.
 
 Not affiliated with Splitwise, Inc.
 
@@ -13,7 +13,7 @@ You need a Splitwise API key. Register an app at [secure.splitwise.com/apps](htt
 **Claude Code**
 
 ```bash
-claude mcp add goodwill -e SPLITWISE_API_KEY=your-key -- npx -y goodwill-mcp
+claude mcp add splittab -e SPLITWISE_API_KEY=your-key -- npx -y splittab-mcp
 ```
 
 **Claude Desktop, Cursor, or any MCP client**
@@ -21,9 +21,9 @@ claude mcp add goodwill -e SPLITWISE_API_KEY=your-key -- npx -y goodwill-mcp
 ```json
 {
   "mcpServers": {
-    "goodwill": {
+    "splittab": {
       "command": "npx",
-      "args": ["-y", "goodwill-mcp"],
+      "args": ["-y", "splittab-mcp"],
       "env": { "SPLITWISE_API_KEY": "your-key" }
     }
   }
@@ -80,7 +80,7 @@ Resources: `splitwise://groups`, `splitwise://categories`, `splitwise://currenci
 Every expense you add changes what other people owe. So:
 
 - **Every write previews and waits.** The tool returns the split, names the people whose balances change, and posts only after you confirm. This uses the MCP 2026-07-28 multi round-trip pattern, so the confirmation is a real protocol step, not a prompt the model can talk itself out of.
-- **Every change signs itself.** An expense this connector adds or corrects gets a comment saying what happened and that Goodwill MCP did it, visible to everyone on the expense. Splitwise attributes expenses to the app that made them, but that is easy to miss; a comment is not.
+- **Every change signs itself.** An expense this connector adds or corrects gets a comment saying what happened and that Splittab MCP did it, visible to everyone on the expense. Splitwise attributes expenses to the app that made them, but that is easy to miss; a comment is not.
 - **No deletes.** There is no tool that removes an expense, a group, or a member. If a duplicate should go, you remove it in the Splitwise app.
 - **Corrections show what they overwrite.** `update_expense` is the only tool that changes something people have already seen, so its preview puts the current values next to the new ones and spells out what each person's share becomes. On the hosted server it needs a `modify` scope that is not granted by default.
 - **No double posts.** A write log keyed by group, amount, day, payer and normalised description refuses to post the same expense twice within 48 hours, across retries and across devices. The fingerprint is reserved before the upstream call, not merely looked up, so two requests racing each other cannot both win.
@@ -98,11 +98,11 @@ SPLITWISE_API_KEY=your-key npm run dev:http     # http://127.0.0.1:3000/mcp
 
 1. In your Splitwise app settings, set the callback URL to `https://<your-worker-host>/callback`.
 2. `npx wrangler kv namespace create OAUTH_KV`; paste the id into `wrangler.jsonc`.
-3. Secrets: `npx wrangler secret put SPLITWISE_CLIENT_ID`, `SPLITWISE_CLIENT_SECRET`, `GOODWILL_STATE_KEY` (32+ random characters).
+3. Secrets: `npx wrangler secret put SPLITWISE_CLIENT_ID`, `SPLITWISE_CLIENT_SECRET`, `SPLITTAB_STATE_KEY` (32+ random characters).
 4. Set `ALLOWED_EMAILS` in `wrangler.jsonc`. Empty means nobody.
 5. `npm run deploy`, then add `https://<your-worker-host>/mcp` as a custom connector. Operating notes are in [RUNBOOK.md](RUNBOOK.md).
 
-A Splitwise access token never expires and has no scopes, so a hosted deployment holds permanent full account access for every user. Goodwill stores each token encrypted, decrypts it only while serving that person's own request, and adds `read`, `add` and `modify` scopes of its own because Splitwise has none. It is allowlisted by design. See [SECURITY.md](SECURITY.md).
+A Splitwise access token never expires and has no scopes, so a hosted deployment holds permanent full account access for every user. Splittab stores each token encrypted, decrypts it only while serving that person's own request, and adds `read`, `add` and `modify` scopes of its own because Splitwise has none. It is allowlisted by design. See [SECURITY.md](SECURITY.md).
 
 ## Design notes
 

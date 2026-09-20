@@ -219,7 +219,7 @@
     structured.posted: true
     prompt_includes:
       - "This changes what Priya S and Sam K owe"
-      - "It will carry a comment saying Added by Goodwill MCP"
+      - "It will carry a comment saying Added by Splittab MCP"
       - "Post it?"
     writes.create_expense: 1
     # The expense, then the trail comment saying where it came from.
@@ -307,7 +307,7 @@
       - "which everyone on it can already see"
       - "cost: 84.00 -> 90.00"
       - "Priya S: 28.00 -> 30.00"
-      - "A comment saying Added by Goodwill MCP will be posted on it."
+      - "A comment saying Added by Splittab MCP will be posted on it."
     writes.update_expense: 1
     writes.create_comment: 1
 

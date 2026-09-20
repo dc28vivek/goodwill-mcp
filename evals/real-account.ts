@@ -40,9 +40,9 @@ function truncate(text: string, lines = 14): string {
 }
 
 async function main() {
-  const deps = createDeps({ token: token as string, stateKey: 'goodwill-doctor-key-0123456789abcdef0123456789', metrics: noopMetrics() });
+  const deps = createDeps({ token: token as string, stateKey: 'splittab-doctor-key-0123456789abcdef0123456789', metrics: noopMetrics() });
   const server = buildServer(deps);
-  const client = new Client({ name: 'goodwill-doctor', version: '0.0.0' });
+  const client = new Client({ name: 'splittab-doctor', version: '0.0.0' });
   const [ct, st] = InMemoryTransport.createLinkedPair();
   await Promise.all([server.connect(st), client.connect(ct)]);
 

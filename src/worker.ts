@@ -47,7 +47,7 @@ export interface Env {
   SPLITWISE_CLIENT_ID: string;
   SPLITWISE_CLIENT_SECRET: string;
   /** HMAC key for multi round-trip state and for the OAuth state parameter. At least 32 characters. */
-  GOODWILL_STATE_KEY: string;
+  SPLITTAB_STATE_KEY: string;
   /** Optional OTLP collector. With none set, tracing is off and costs nothing. */
   OTEL_EXPORTER_OTLP_ENDPOINT?: string;
   /** `key=value,key=value`, typically an API key for a hosted collector. */
@@ -72,7 +72,7 @@ const SPLITWISE_AUTHORIZE = 'https://secure.splitwise.com/oauth/authorize';
 const SPLITWISE_TOKEN = 'https://secure.splitwise.com/oauth/token';
 const SPLITWISE_ME = 'https://secure.splitwise.com/api/v3.0/get_current_user';
 const STATE_TTL_SECONDS = 600;
-const STATE_COOKIE = 'gw_state';
+const STATE_COOKIE = 'st_state';
 
 /** What travels through Splitwise in the state parameter. */
 interface StatePayload {
@@ -98,7 +98,7 @@ function redirect(location: string, cookie?: string): Response {
 
 function html(body: string, status = 200): Response {
   return new Response(
-    `<!doctype html><meta charset="utf-8"><title>Goodwill</title><body style="font:16px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem">${body}</body>`,
+    `<!doctype html><meta charset="utf-8"><title>Splittab</title><body style="font:16px system-ui;max-width:40rem;margin:4rem auto;padding:0 1rem">${body}</body>`,
     { status, headers: { 'content-type': 'text/html; charset=utf-8' } },
   );
 }
@@ -177,9 +177,9 @@ const defaultHandler: ExportedHandler<Env> = {
     const url = new URL(request.url);
 
     if (url.pathname === '/' || url.pathname === '/health') {
-      if (url.pathname === '/health') return Response.json({ ok: true, name: 'goodwill-mcp' });
+      if (url.pathname === '/health') return Response.json({ ok: true, name: 'splittab-mcp' });
       return html(
-        `<h1>Goodwill</h1><p><strong>An unofficial Splitwise MCP server.</strong> Add <code>${url.origin}/mcp</code> as a custom connector in Claude, then sign in with Splitwise. Access is limited to an allowlist.</p><p>In accounting, goodwill is the value of a relationship that never appears on the balance sheet. That is what this protects.</p><p>Not affiliated with, endorsed by, or supported by Splitwise, Inc.</p>`,
+        `<h1>Splittab</h1><p><strong>An unofficial Splitwise MCP server.</strong> Add <code>${url.origin}/mcp</code> as a custom connector in Claude, then sign in with Splitwise. Access is limited to an allowlist.</p><p>Splitting the tab is the easy half. Remembering it, explaining it, and asking for it back is the half that costs you something. This is for that half.</p><p>Not affiliated with, endorsed by, or supported by Splitwise, Inc.</p>`,
       );
     }
 
@@ -204,7 +204,7 @@ const defaultHandler: ExportedHandler<Env> = {
       // so nothing can fail to replicate before the person comes back.
       const binding = newBinding();
       const payload: StatePayload = { req: authRequest, bind: await bindingDigest(binding) };
-      const state = await signState(env.GOODWILL_STATE_KEY, payload, STATE_TTL_SECONDS);
+      const state = await signState(env.SPLITTAB_STATE_KEY, payload, STATE_TTL_SECONDS);
 
       const to = new URL(SPLITWISE_AUTHORIZE);
       to.searchParams.set('response_type', 'code');
@@ -218,7 +218,7 @@ const defaultHandler: ExportedHandler<Env> = {
       const code = url.searchParams.get('code');
       const state = url.searchParams.get('state');
       if (!code || !state) return html('<p>Missing code or state.</p>', 400);
-      const verified = await verifyState<StatePayload>(env.GOODWILL_STATE_KEY, state);
+      const verified = await verifyState<StatePayload>(env.SPLITTAB_STATE_KEY, state);
       if (!verified.ok) return html(`<p>${STATE_MESSAGE[verified.reason]}</p>`, 400);
       const { req: authRequest, bind } = verified.payload;
 
@@ -269,7 +269,7 @@ export class McpApi extends WorkerEntrypoint<Env, Props> {
     const tracer = makeTracer(this.env, request);
     const deps = createDeps({
       token: props.splitwiseToken,
-      stateKey: this.env.GOODWILL_STATE_KEY,
+      stateKey: this.env.SPLITTAB_STATE_KEY,
       writeLog: new DurableWriteLog(stub),
       budget: new DurableBudget(stub),
       cache: new WorkersCache(caches.default),

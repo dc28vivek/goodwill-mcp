@@ -32,9 +32,9 @@ function check(name: string, ok: boolean, detail = '') {
 }
 
 async function main() {
-  const deps = createDeps({ token: token as string, stateKey: 'goodwill-sweep-key-0123456789abcdef0123456789', metrics: noopMetrics() });
+  const deps = createDeps({ token: token as string, stateKey: 'splittab-sweep-key-0123456789abcdef0123456789', metrics: noopMetrics() });
   const server = buildServer(deps);
-  const client = new Client({ name: 'goodwill-sweep', version: '0.0.0' }, { capabilities: { elicitation: { form: {} } } });
+  const client = new Client({ name: 'splittab-sweep', version: '0.0.0' }, { capabilities: { elicitation: { form: {} } } });
   client.setRequestHandler('elicitation/create', async (req) => {
     prompts.push(String(req.params.message));
     return answer === 'decline' ? { action: 'decline' } : { action: 'accept', content: { confirm: true } };
@@ -53,7 +53,7 @@ async function main() {
   console.log(`Signed in as ${me.first_name}. Creating a sandbox group.\n`);
 
   // 1. create_group, just me.
-  const created = await call('create_group', { name: `Goodwill sandbox ${stamp}`, group_type: 'other', members: [] });
+  const created = await call('create_group', { name: `Splittab sandbox ${stamp}`, group_type: 'other', members: [] });
   const groupId = Number(created.sc?.group_id);
   check('create_group', created.sc?.created === true && Number.isFinite(groupId), `group ${groupId}`);
   check('  preview said it would create it', /Create a group called/.test(created.prompt), created.prompt.slice(0, 60));
@@ -66,7 +66,7 @@ async function main() {
   const added = await call('add_expense', { group_id: groupId, text: 'Sandbox coffee 4.20', idempotency_key: `sweep-${stamp}-1` });
   const expenseId = Number(added.sc?.expense_id);
   check('add_expense', added.sc?.posted === true, `expense ${expenseId}, ${String(added.sc?.cost)}`);
-  check('  preview named the split and the signature', /Split:/.test(added.prompt) && /Added by Goodwill MCP/.test(added.prompt));
+  check('  preview named the split and the signature', /Split:/.test(added.prompt) && /Added by Splittab MCP/.test(added.prompt));
 
   // 3. the same expense again: the write log should refuse it.
   const dupe = await call('add_expense', { group_id: groupId, text: 'Sandbox coffee 4.20' });
@@ -86,7 +86,7 @@ async function main() {
   // 6. the trail comments actually landed.
   const read = await call('read_expense', { expense_id: expenseId });
   const comments = (read.sc?.expense as { comments?: { text: string }[] } | undefined)?.comments ?? [];
-  const signed = comments.filter((c) => c.text.includes('Added by Goodwill MCP'));
+  const signed = comments.filter((c) => c.text.includes('Added by Splittab MCP'));
   check('trail comments posted', signed.length >= 2, `${signed.length} signed of ${comments.length}`);
 
   // 7. split_by_items with a deliberately wrong total.
