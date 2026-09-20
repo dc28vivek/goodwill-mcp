@@ -174,3 +174,64 @@ describe('choosing where the window opens', () => {
     }
   });
 });
+
+describe('an expense and a payment filed on the same day', () => {
+  // The real case: a $2,000 payment and a $20.62 expense both dated Sep 6.
+  // Sorting on `date` alone left them tied, so "what was added since the last
+  // payment" had no defensible answer and the model inferred the order from the
+  // activity feed. `created_at` decides it in code.
+  const sameDay = (createdAt: string, amount: string, description: string, payment = false) =>
+    expense({
+      description,
+      cost: amount,
+      payment,
+      date: '2026-09-06T12:00:00Z',
+      created_at: createdAt,
+      users: payment
+        ? [
+            { user: { id: PRIYA.id, first_name: PRIYA.first_name, last_name: PRIYA.last_name }, user_id: PRIYA.id, paid_share: amount, owed_share: '0', net_balance: amount },
+            { user: { id: ME.id, first_name: ME.first_name, last_name: ME.last_name }, user_id: ME.id, paid_share: '0', owed_share: amount, net_balance: `-${amount}` },
+          ]
+        : [
+            { user: { id: ME.id, first_name: ME.first_name, last_name: ME.last_name }, user_id: ME.id, paid_share: amount, owed_share: '0', net_balance: amount },
+            { user: { id: PRIYA.id, first_name: PRIYA.first_name, last_name: PRIYA.last_name }, user_id: PRIYA.id, paid_share: '0', owed_share: amount, net_balance: `-${amount}` },
+          ],
+    });
+
+  // Arrays arrive newest first, the way get_expenses returns them. That
+  // matters: toSorted is stable, so a fixture already in the right order hides
+  // the bug completely. The first version of these tests passed against the
+  // broken code for exactly that reason.
+  it('counts an expense entered after the payment', () => {
+    const history = [
+      sameDay('2026-09-06T11:00:00Z', '20.62', 'Entered after the payment'),
+      sameDay('2026-09-06T10:00:00Z', '100.00', 'Payment', true),
+      sameDay('2026-09-06T09:00:00Z', '100.00', 'Old charge'),
+    ];
+    const [eur] = explainBalance(ME.id, PRIYA.id, history, 'last_payment');
+    expect(eur?.charged).toBe(2062);
+    expect(eur?.contributions.map((c) => c.description)).toEqual(['Entered after the payment']);
+  });
+
+  it('leaves out an expense entered before the payment, because it was already covered', () => {
+    const history = [
+      sameDay('2026-09-06T10:00:00Z', '20.62', 'Payment', true),
+      sameDay('2026-09-06T09:00:00Z', '20.62', 'Entered before the payment'),
+    ];
+    const [eur] = explainBalance(ME.id, PRIYA.id, history, 'last_payment');
+    expect(eur?.charged).toBe(0);
+    expect(eur?.contributions).toHaveLength(0);
+    expect(eur?.net).toBe(0);
+  });
+
+  it('orders the window itself by entry time, not just by day', () => {
+    const history = [
+      sameDay('2026-09-06T09:00:00Z', '2.00', 'Second entered'),
+      sameDay('2026-09-06T08:00:00Z', '1.00', 'First entered'),
+      sameDay('2026-09-06T10:00:00Z', '3.00', 'Third entered'),
+    ];
+    const [eur] = explainBalance(ME.id, PRIYA.id, history, 'all');
+    // Newest first in the listing.
+    expect(eur?.contributions.map((c) => c.description)).toEqual(['Third entered', 'Second entered', 'First entered']);
+  });
+});

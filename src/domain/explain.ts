@@ -5,6 +5,16 @@ export interface Contribution {
   expenseId: number;
   description: string;
   date: string;
+  /**
+   * When the entry was actually made, as opposed to the day it is filed under.
+   *
+   * `date` is the day the user picked and is frequently just a date, so an
+   * expense and a payment filed on the same day tie. "Since the last payment"
+   * then has no defensible answer and the model is left inferring order from
+   * the activity feed, which is guessing. `created_at` is a real timestamp and
+   * settles it in code, which is where that work belongs.
+   */
+  createdAt: string;
   currency: string;
   /** Positive: the counterparty owes `me` from this expense. Negative: I owe them. */
   amount: Minor;
@@ -109,6 +119,7 @@ export function explainBalance(meId: number, counterpartyId: number, expenses: S
       expenseId: e.id,
       description: e.description,
       date: e.date,
+      createdAt: e.created_at,
       currency: e.currency_code,
       amount,
       total: toMinor(e.cost),
@@ -118,7 +129,9 @@ export function explainBalance(meId: number, counterpartyId: number, expenses: S
   }
 
   return [...byCurrency.entries()].map(([currency, all]) => {
-    const chronological = all.toSorted((a, b) => a.date.localeCompare(b.date));
+    // Same-day ties break on when the entry was really made, so the window
+    // boundary is a fact rather than an inference.
+    const chronological = all.toSorted((a, b) => a.date.localeCompare(b.date) || (a.createdAt ?? '').localeCompare(b.createdAt ?? ''));
 
     // Choose where the window opens. Everything before it is summarised as a
     // single brought-forward figure rather than replayed line by line.
@@ -166,7 +179,7 @@ export function explainBalance(meId: number, counterpartyId: number, expenses: S
       settledOn,
       since: mode,
       closedCount: cutAfter + 1,
-      contributions: open.toSorted((a, b) => b.date.localeCompare(a.date)),
+      contributions: open.toSorted((a, b) => b.date.localeCompare(a.date) || (b.createdAt ?? '').localeCompare(a.createdAt ?? '')),
     };
   });
 }
