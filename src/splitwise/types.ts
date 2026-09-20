@@ -31,7 +31,8 @@ export interface SwGroupMember extends SwUser {
 export interface SwGroup {
   id: number;
   name: string;
-  group_type: 'home' | 'trip' | 'couple' | 'other' | 'apartment' | 'house';
+  /** Real accounts return null for groups created before types existed. */
+  group_type: 'home' | 'trip' | 'couple' | 'other' | 'apartment' | 'house' | null;
   updated_at: string;
   simplify_by_default: boolean;
   members: SwGroupMember[];

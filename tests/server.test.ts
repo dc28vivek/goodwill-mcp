@@ -66,7 +66,8 @@ describe('goodwill server', () => {
     const sc = r.structuredContent as { balances: { charged: string; settled: string; remaining: string; payment_count: number }[] };
     expect(sc.balances[0]).toMatchObject({ charged: '69.00', settled: '49.00', remaining: '20.00', payment_count: 1 });
     const text = String((r.content[0] as { text: string }).text);
-    expect(text).toContain('Paid back');
+    // The label says who actually paid, because a payment does not always reduce a debt.
+    expect(text).toContain('Sam K paid you');
     expect(text).toContain('in 1 payment');
   });
 
@@ -286,5 +287,26 @@ describe('goodwill server', () => {
     expect(r.isError).toBe(true);
     expect((r.content[0] as { text: string }).text).toContain('not a member');
     expect(state.writes).toHaveLength(0);
+  });
+
+  it('keeps a whole-group answer short by leaving out per-person expense lists', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100 } });
+    const sc = r.structuredContent as { balances: { contributions: unknown[] }[] };
+    // Two counterparties, each with a statement but no expense list.
+    expect(sc.balances).toHaveLength(2);
+    for (const b of sc.balances) expect(b.contributions).toEqual([]);
+    const text = String((r.content[0] as { text: string }).text);
+    expect(text).toContain('Ask about one person to see the expenses behind their number.');
+    expect(text).not.toContain('Dinner at Cervejaria');
+    expect(text.split('\n').length).toBeLessThan(15);
+  });
+
+  it('still gives the full expense list when one person is named', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Priya' } });
+    const sc = r.structuredContent as { balances: { contributions: unknown[] }[] };
+    expect(sc.balances[0]?.contributions).toHaveLength(2);
+    expect(String((r.content[0] as { text: string }).text)).toContain('Dinner at Cervejaria');
   });
 });

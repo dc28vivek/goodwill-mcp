@@ -28,6 +28,8 @@
   expect:
     isError: false
     structured.balances.length: 2
+    structured.balances.0.contributions.length: 0
+    text_includes: ["Ask about one person to see the expenses behind their number."]
 
 - id: ambiguous-name
   model: true

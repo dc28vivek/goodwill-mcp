@@ -27,6 +27,13 @@ export interface BalanceExplanation {
   settled: Minor;
   expenseCount: number;
   paymentCount: number;
+  /**
+   * The date the previous period was settled, if it ever was. Everything on or
+   * before this is closed and is left out of the figures above.
+   */
+  settledOn: string | null;
+  /** How many closed items were left out. */
+  closedCount: number;
   contributions: Contribution[];
 }
 
@@ -82,20 +89,36 @@ export function explainBalance(meId: number, counterpartyId: number, expenses: S
     byCurrency.set(e.currency_code, list);
   }
 
-  return [...byCurrency.entries()].map(([currency, contributions]) => {
-    const expenses = contributions.filter((c) => c.kind === 'expense');
-    const payments = contributions.filter((c) => c.kind === 'payment');
+  return [...byCurrency.entries()].map(([currency, all]) => {
+    const chronological = [...all].sort((a, b) => a.date.localeCompare(b.date));
+
+    // Everything up to the last moment the balance stood at zero is closed.
+    // Explaining a balance means explaining what has happened since then, not
+    // replaying years of settled history.
+    let running = 0;
+    let lastZero = -1;
+    for (let i = 0; i < chronological.length; i += 1) {
+      running += chronological[i]!.amount;
+      if (running === 0) lastZero = i;
+    }
+    const open = chronological.slice(lastZero + 1);
+    const settledOn = lastZero >= 0 ? chronological[lastZero]!.date : null;
+
+    const expenses = open.filter((c) => c.kind === 'expense');
+    const payments = open.filter((c) => c.kind === 'payment');
     const sum = (list: Contribution[]) => list.reduce((acc, c) => acc + c.amount, 0);
     return {
       meId,
       counterpartyId,
       currency,
-      net: sum(contributions),
+      net: sum(open),
       charged: sum(expenses),
       settled: sum(payments),
       expenseCount: expenses.length,
       paymentCount: payments.length,
-      contributions: contributions.sort((a, b) => b.date.localeCompare(a.date)),
+      settledOn,
+      closedCount: lastZero + 1,
+      contributions: open.sort((a, b) => b.date.localeCompare(a.date)),
     };
   });
 }

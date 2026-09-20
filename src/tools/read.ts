@@ -64,6 +64,11 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         expenses = (await deps.client.allExpenses({ friend_id: r.user.id })).filter((e) => e.group_id === null || e.group_id === 0);
       }
 
+      // A whole-group answer lists every member. Including each person's full
+      // expense history turns that into hundreds of lines of context for a
+      // question nobody asked. Detail is for a single counterparty.
+      const oneCounterparty = counterparties.length === 1;
+      const MAX_CONTRIBUTIONS = 20;
       const balances = counterparties.flatMap((cp) =>
         explainBalance(me.id, cp.id, expenses).map((b) => ({
           counterparty: person(cp),
@@ -74,7 +79,11 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
           remaining: fromMinor(Math.abs(b.net)),
           expense_count: b.expenseCount,
           payment_count: b.paymentCount,
-          contributions: b.contributions.map((c) => ({
+          settled_on: b.settledOn ? b.settledOn.slice(0, 10) : null,
+          closed_count: b.closedCount,
+          charged_raw: b.charged,
+          settled_raw: b.settled,
+          contributions: (oneCounterparty ? b.contributions.slice(0, MAX_CONTRIBUTIONS) : []).map((c) => ({
             expense_id: c.expenseId,
             description: untrusted(c.description),
             date: c.date.slice(0, 10),
@@ -96,21 +105,30 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
               : `You and ${who} are settled in ${b.currency}`;
         if (b.direction === 'settled' && b.expense_count === 0) return head;
         const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
-        const mine = b.direction === 'you_owe_them';
-        const rows: [string, string, string][] = [
-          [mine ? 'You were charged' : `${who} was charged`, b.charged, `across ${plural(b.expense_count, 'expense')}`],
-          [mine ? 'You have paid back' : 'Paid back', b.settled, b.payment_count ? `in ${plural(b.payment_count, 'payment')}` : ''],
-          ['Left', b.remaining, ''],
-        ];
+        // Label by what actually happened. A payment does not always reduce a
+        // debt: one with no expenses behind it creates the debt instead.
+        const rows: [string, string, string][] = [];
+        if (b.expense_count > 0) {
+          rows.push([b.charged_raw > 0 ? `${who} was charged` : 'You were charged', b.charged, `across ${plural(b.expense_count, 'expense')}`]);
+        }
+        if (b.payment_count > 0) {
+          rows.push([b.settled_raw < 0 ? `${who} paid you` : `You paid ${who}`, b.settled, `in ${plural(b.payment_count, 'payment')}`]);
+        }
+        rows.push(['Left', b.remaining, '']);
         const labelWidth = Math.max(...rows.map(([label]) => label.length));
         const amountWidth = Math.max(...rows.map(([, amount]) => amount.length));
         const statement = rows.map(
           ([label, amount, note]) => `  ${label.padEnd(labelWidth)}  ${amount.padStart(amountWidth)} ${b.currency}${note ? `  ${note}` : ''}`,
         );
-        const items = b.contributions.slice(0, 8).map((c) => `  ${c.date}  ${c.amount.padStart(9)}  ${c.kind === 'payment' ? '(payment) ' : ''}${c.description}`);
-        return [head, ...statement, '', ...items].join('\n');
+        const since = b.settled_on ? `  (since you settled up on ${b.settled_on}; ${b.closed_count} earlier items are closed)` : '';
+        if (!oneCounterparty) return [head + since, ...statement].join('\n');
+        const items = b.contributions.map((c) => `  ${c.date}  ${c.amount.padStart(9)}  ${c.kind === 'payment' ? '(payment) ' : ''}${c.description}`);
+        const more = b.expense_count + b.payment_count - items.length;
+        return [head + since, ...statement, '', ...items, ...(more > 0 ? [`  ... and ${more} older items`] : [])].join('\n');
       });
-      return ok(lines.length ? lines.join('\n\n') : 'No shared expenses found.', { me: person(me), balances });
+      const footer = oneCounterparty || balances.length === 0 ? '' : '\n\nAsk about one person to see the expenses behind their number.';
+      const structured = balances.map(({ charged_raw: _c, settled_raw: _s, ...rest }) => rest);
+      return ok(lines.length ? `${lines.join('\n\n')}${footer}` : 'No shared expenses found.', { me: person(me), balances: structured });
     }),
   );
 

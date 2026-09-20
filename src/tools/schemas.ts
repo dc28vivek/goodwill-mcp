@@ -25,6 +25,8 @@ export const ExplainOutput = z.object({
       remaining: Money.describe('What is still open. charged minus settled.'),
       expense_count: z.number(),
       payment_count: z.number(),
+      settled_on: z.string().nullable().describe('Date this balance last stood at zero. Everything on or before it is closed and excluded.'),
+      closed_count: z.number().describe('How many settled items were left out.'),
       contributions: z.array(Contribution),
     }),
   ),
