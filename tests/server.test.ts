@@ -32,7 +32,7 @@ describe('splittab server', () => {
   it('lists every tool with honest annotations and fixed order', async () => {
     const { client } = await connect(state);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['list_groups', 'explain_balance', 'list_expenses', 'read_expense', 'recent_activity', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'find_duplicates', 'add_expense', 'update_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up']);
+    expect(tools.map((t) => t.name)).toEqual(['list_groups', 'explain_balance', 'list_expenses', 'read_expense', 'recent_activity', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'find_duplicates', 'add_expense', 'update_expense', 'create_group', 'add_to_group', 'split_by_items', 'record_payment']);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.explain_balance?.annotations?.readOnlyHint).toBe(true);
     expect(byName.add_expense?.annotations?.readOnlyHint).toBe(false);
@@ -322,7 +322,7 @@ describe('splittab server', () => {
 
   it('records a settlement for the full outstanding balance', async () => {
     const { client, prompts } = await connect(state, true);
-    const r = await client.callTool({ name: 'settle_up', arguments: { friend: 'Priya', group: 100 } });
+    const r = await client.callTool({ name: 'record_payment', arguments: { friend: 'Priya', group: 100 } });
     expect(prompts[0]).toContain('Priya S paid you 61.00 EUR');
     expect(prompts[0]).toContain('This closes the balance with Priya S');
     const sc = r.structuredContent as { recorded: boolean; amount: string };
@@ -334,13 +334,13 @@ describe('splittab server', () => {
 
   it('records a partial settlement and says what is left', async () => {
     const { client, prompts } = await connect(state, true);
-    await client.callTool({ name: 'settle_up', arguments: { friend: 'Priya', group: 100, amount: '20.00', direction: 'they_paid' } });
+    await client.callTool({ name: 'record_payment', arguments: { friend: 'Priya', group: 100, amount: '20.00', direction: 'they_paid' } });
     expect(prompts[0]).toContain('41.00 EUR would still be open');
   });
 
   it('refuses to settle with someone who owes nothing', async () => {
     const { client } = await connect(state, true);
-    const r = await client.callTool({ name: 'settle_up', arguments: { friend: 'Alex Brown', group: 100 } });
+    const r = await client.callTool({ name: 'record_payment', arguments: { friend: 'Alex Brown', group: 100 } });
     expect(r.isError).toBe(true);
     expect((r.content[0] as { text: string }).text).toContain('nothing outstanding');
   });
@@ -731,7 +731,7 @@ describe('splittab server', () => {
 
   it('signs a recorded payment too', async () => {
     const { client } = await connect(state, true);
-    await client.callTool({ name: 'settle_up', arguments: { friend: 'Priya', group: 100 } });
+    await client.callTool({ name: 'record_payment', arguments: { friend: 'Priya', group: 100 } });
     expect(state.comments.at(-1)?.content).toContain('Recorded a payment of 61.00 EUR');
   });
 

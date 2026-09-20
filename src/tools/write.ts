@@ -9,7 +9,7 @@ import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, timed, untruste
 import { type Invitee, describeGroupResolution, describeResolution, resolveGroup, resolveInvitee, resolveMember } from '../server/resolve.js';
 import type { SwAddUserToGroup, SwCreateExpenseByShares, SwCreateGroup, SwExpense, SwUser } from '../splitwise/types.js';
 import type { WriteRecord } from '../store/writeLog.js';
-import { AddExpenseOutput, AddMembersOutput, BoolArg, ConfirmSchema, GroupArg, GroupOutput, IntArg, ItemSplitOutput, ReceiptItemInput, SettleOutputWrite, UpdateExpenseOutput } from './schemas.js';
+import { AddExpenseOutput, AddMembersOutput, BoolArg, ConfirmSchema, GroupArg, GroupOutput, IntArg, ItemSplitOutput, ReceiptItemInput, PaymentOutput, UpdateExpenseOutput } from './schemas.js';
 
 const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } as const;
 
@@ -38,7 +38,7 @@ async function annotate(deps: Deps, expenseId: number, what: string): Promise<bo
   }
 }
 
-type WriteTool = 'add_expense' | 'update_expense' | 'create_group' | 'split_by_items' | 'settle_up';
+type WriteTool = 'add_expense' | 'update_expense' | 'create_group' | 'split_by_items' | 'record_payment';
 
 export const IN_FLIGHT_NOTE = 'An identical write is being posted right now by another request from this account. Refused, so it cannot land twice.';
 
@@ -120,7 +120,7 @@ interface AddMembersPayload {
   additions: { body: SwAddUserToGroup; name: string; status: 'already_on_splitwise' | 'invited' }[];
 }
 
-interface SettlePayload {
+interface PaymentPayload {
   body: SwCreateExpenseByShares;
   fromName: string;
   toName: string;
@@ -946,11 +946,11 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
   );
 
   server.registerTool(
-    'settle_up',
+    'record_payment',
     {
       title: 'Record a payment',
       description:
-        'Record that money changed hands, so the balance closes in Splitwise. Use this after you actually paid someone (or they paid you) through Venmo, UPI, a bank transfer or cash. Defaults to the full outstanding balance. Shows a preview and waits for confirmation. This does not move money; it records a payment that already happened. Posts a comment noting that Splittab MCP recorded it.',
+        'Record that money changed hands, so the balance closes in Splitwise. Only use this after money has actually moved: Venmo, UPI, a bank transfer, cash. If nobody has paid yet, do not call this. It writes a payment into a ledger the whole group can see, and a payment that never happened is very hard for them to unpick. Defaults to the full outstanding balance. Shows a preview and waits for confirmation. This does not move money; it records a payment that already happened. Posts a comment noting that Splittab MCP recorded it.',
       inputSchema: z.object({
         friend: z.string().describe('Member name or id.'),
         amount: z.string().optional().describe('Decimal string like "61.00". Defaults to the full outstanding balance with this person.'),
@@ -960,10 +960,10 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         date: z.string().optional().describe('YYYY-MM-DD. Defaults to today.'),
         idempotency_key: z.string().max(64).optional(),
       }),
-      outputSchema: SettleOutputWrite,
+      outputSchema: PaymentOutput,
       annotations: WRITE,
     },
-    timed(deps, 'settle_up', async (args, ctx) => {
+    timed(deps, 'record_payment', async (args, ctx) => {
       const denied = missingScope(ctx, 'add');
       if (denied) return denied;
       let groupId: number | undefined;
@@ -975,24 +975,24 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       const me = await deps.me();
       const pending = ctx.mcpReq.requestState<PendingWrite>();
 
-      if (pending && pending.kind === 'settle_up') {
+      if (pending && pending.kind === 'record_payment') {
         if (pending.userId !== me.id) return fail('This confirmation belongs to a different Splitwise account. Start again.');
-        const payload = pending.payload as SettlePayload;
+        const payload = pending.payload as PaymentPayload;
         const answer = acceptedContent(ctx.mcpReq.inputResponses, 'confirm', ConfirmSchema);
         if (!answer || answer.confirm !== true || declined(ctx.mcpReq.inputResponses)) {
-          deps.metrics.emit({ type: 'preview_declined', tool: 'settle_up' });
+          deps.metrics.emit({ type: 'preview_declined', tool: 'record_payment' });
           return ok('Cancelled. No payment was recorded.', { recorded: false, note: 'Cancelled by the user.' });
         }
-        deps.metrics.emit({ type: 'preview_confirmed', tool: 'settle_up' });
+        deps.metrics.emit({ type: 'preview_confirmed', tool: 'record_payment' });
         const guard = await withClaim(
           deps,
-          'settle_up',
+          'record_payment',
           me.id,
           pending.fingerprint,
           pending.idempotencyKey,
           async () => {
             const posted = await deps.client.createExpense(payload.body);
-            deps.metrics.emit({ type: 'write_posted', tool: 'settle_up' });
+            deps.metrics.emit({ type: 'write_posted', tool: 'record_payment' });
             await annotate(deps, posted.id, `Recorded a payment of ${payload.amount} ${payload.currency} from ${payload.fromName} to ${payload.toName}.`);
             return posted;
           },
@@ -1087,10 +1087,12 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         users__1__owed_share: fromMinor(amountMinor),
       };
 
+      // Prefix left as `settle` through the rename to record_payment: it is an
+      // opaque fingerprint, and changing it would drop live duplicate guards.
       const fp = `settle|${groupId ?? 0}|${payer.id}|${receiver.id}|${currency}|${amountMinor}|${date}`;
       const already = await deps.writeLog.find(String(me.id), fp, args.idempotency_key);
       if (already) {
-        deps.metrics.emit({ type: 'duplicate_blocked', tool: 'settle_up', source: 'write_log' });
+        deps.metrics.emit({ type: 'duplicate_blocked', tool: 'record_payment', source: 'write_log' });
         return ok(`Already recorded as #${already.expenseId} within the last 48 hours. Nothing new was created.`, {
           recorded: false,
           expense_id: already.expenseId,
@@ -1111,10 +1113,10 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
               : ` That is ${fromMinor(-remaining)} ${currency} more than is outstanding.`;
       const preview = `Record a payment: ${fromName} paid ${toName} ${fromMinor(amountMinor)} ${currency} on ${date}.${after} This changes what ${fullName(target)} owes. It will carry a comment saying ${SIGNATURE.replace(/\.$/, '')}.`;
 
-      deps.metrics.emit({ type: 'preview_shown', tool: 'settle_up' });
-      const payload: SettlePayload = { body, fromName, toName, amount: fromMinor(amountMinor), currency };
+      deps.metrics.emit({ type: 'preview_shown', tool: 'record_payment' });
+      const payload: PaymentPayload = { body, fromName, toName, amount: fromMinor(amountMinor), currency };
       const state = await deps.codec.mint({
-        kind: 'settle_up',
+        kind: 'record_payment',
         userId: me.id,
         fingerprint: fp,
         ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),

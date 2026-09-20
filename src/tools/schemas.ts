@@ -172,7 +172,7 @@ export const MissingOutput = z.object({
   ),
 });
 
-export const SettleOutputWrite = z.object({
+export const PaymentOutput = z.object({
   recorded: z.boolean(),
   expense_id: z.number().optional(),
   from: z.string().optional(),

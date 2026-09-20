@@ -67,7 +67,7 @@ Fifteen tools, three resources, one prompt:
 | `add_expense` | A sentence or fields, a preview, then a confirmed post | after confirmation |
 | `update_expense` | Corrects an amount, description, date or category, rescaling shares | after confirmation |
 | `split_by_items` | A receipt split line by line, tax and tip allocated proportionally | after confirmation |
-| `settle_up` | Records a payment that already happened, closing the balance | after confirmation |
+| `record_payment` | Records a payment that already happened, closing the balance | after confirmation |
 
 `find_missing_expenses` and `find_duplicates` are two halves of the same job: making the ledger match reality. One finds what's missing from Splitwise, the other finds what's in there twice.
 

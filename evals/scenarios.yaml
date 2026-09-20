@@ -318,7 +318,7 @@
 
 - id: settle-full
   prompt: "Priya paid me back for Lisbon, record it"
-  tool: settle_up
+  tool: record_payment
   args: { friend: "Priya", group: 100 }
   answer: accept
   expect:
@@ -329,7 +329,7 @@
 
 - id: settle-declined
   prompt: "Record that Priya paid me (then say no)"
-  tool: settle_up
+  tool: record_payment
   args: { friend: "Priya", group: 100 }
   answer: decline
   expect:
