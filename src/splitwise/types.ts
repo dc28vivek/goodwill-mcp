@@ -132,3 +132,17 @@ export interface SwCreateExpenseByShares {
   /** users__{i}__user_id, users__{i}__paid_share, users__{i}__owed_share */
   [key: `users__${number}__${'user_id' | 'paid_share' | 'owed_share'}`]: string | number;
 }
+
+/** Body for POST /create_group. Members are flattened like expense shares. */
+export interface SwCreateGroup {
+  name: string;
+  group_type?: 'home' | 'trip' | 'couple' | 'other';
+  simplify_by_default?: boolean;
+  /** users__{i}__user_id for an existing person, or first_name/last_name/email to invite one. */
+  [key: `users__${number}__${'user_id' | 'first_name' | 'last_name' | 'email'}`]: string | number | undefined;
+}
+
+/** Body for POST /add_user_to_group: either a known user id, or a new invitation. */
+export type SwAddUserToGroup =
+  | { group_id: number; user_id: number }
+  | { group_id: number; first_name: string; last_name: string; email: string };

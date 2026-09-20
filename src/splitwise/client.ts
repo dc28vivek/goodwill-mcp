@@ -1,5 +1,7 @@
 import type {
+  SwAddUserToGroup,
   SwCategory,
+  SwCreateGroup,
   SwComment,
   SwCreateExpenseByShares,
   SwCurrency,
@@ -8,6 +10,7 @@ import type {
   SwFriend,
   SwGroup,
   SwNotification,
+  SwUser,
 } from './types.js';
 
 /**
@@ -117,6 +120,27 @@ export class SplitwiseClient {
 
   async group(id: number): Promise<SwGroup> {
     return (await this.request<{ group: SwGroup }>('GET', `/get_group/${id}`)).group;
+  }
+
+  /**
+   * `add_user_to_group` and friends answer 200 with `success: false` when they
+   * fail. The generic `errors` check catches most of it, but an empty errors
+   * object with success false would slip through, so check it explicitly.
+   */
+  private assertSuccess(res: { success?: boolean }, what: string): void {
+    if (res.success === false) throw new SplitwiseError(`Splitwise refused to ${what}`, 200, res);
+  }
+
+  async createGroup(body: SwCreateGroup): Promise<SwGroup> {
+    const res = await this.request<{ group: SwGroup }>('POST', '/create_group', undefined, body);
+    if (!res.group?.id) throw new SplitwiseError('Splitwise returned no group', 200, res);
+    return res.group;
+  }
+
+  async addUserToGroup(body: SwAddUserToGroup): Promise<SwUser> {
+    const res = await this.request<{ success?: boolean; user: SwUser }>('POST', '/add_user_to_group', undefined, body);
+    this.assertSuccess(res, 'add that person to the group');
+    return res.user;
   }
 
   async friends(): Promise<SwFriend[]> {

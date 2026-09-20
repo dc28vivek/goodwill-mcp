@@ -6,9 +6,9 @@ import { fromMinor, splitEqual, toMinor } from '../domain/money.js';
 import { parseExpenseSentence } from '../domain/parser.js';
 import type { Deps, PendingWrite } from '../server/deps.js';
 import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, timed, untrusted } from '../server/format.js';
-import { describeResolution, resolveMember } from '../server/resolve.js';
-import type { SwCreateExpenseByShares, SwExpense, SwUser } from '../splitwise/types.js';
-import { AddExpenseOutput, ConfirmSchema, ItemSplitOutput, NudgeOutput, ReceiptItemInput, SettleOutputWrite } from './schemas.js';
+import { type Invitee, describeResolution, resolveInvitee, resolveMember } from '../server/resolve.js';
+import type { SwAddUserToGroup, SwCreateExpenseByShares, SwCreateGroup, SwExpense, SwUser } from '../splitwise/types.js';
+import { AddExpenseOutput, AddMembersOutput, ConfirmSchema, GroupOutput, ItemSplitOutput, NudgeOutput, ReceiptItemInput, SettleOutputWrite } from './schemas.js';
 
 const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } as const;
 
@@ -25,6 +25,19 @@ interface NudgePayload {
   expenseId: number;
   content: string;
   toName: string;
+}
+
+interface GroupPayload {
+  body: SwCreateGroup;
+  name: string;
+  groupType: string;
+  members: { name: string; status: 'already_on_splitwise' | 'invited' }[];
+}
+
+interface AddMembersPayload {
+  groupId: number;
+  groupName: string;
+  additions: { body: SwAddUserToGroup; name: string; status: 'already_on_splitwise' | 'invited' }[];
 }
 
 interface SettlePayload {
@@ -224,6 +237,233 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         inputRequests: {
           confirm: inputRequired.elicit({ message: `${preview} Post it?`, requestedSchema: ConfirmSchema }),
         },
+        requestState: state,
+      });
+    }),
+  );
+
+  server.registerTool(
+    'create_group',
+    {
+      title: 'Create a group',
+      description:
+        'Create a new Splitwise group and optionally add people to it. Name people who are already your Splitwise friends by name; invite anyone else with an email address. Shows a preview separating the two, because an email sends a real invitation, and waits for confirmation. Use this before add_expense when the group does not exist yet.',
+      inputSchema: z.object({
+        name: z.string().min(1).max(80).describe('What the group is called, e.g. "Goa Trip".'),
+        group_type: z.enum(['trip', 'home', 'couple', 'other']).default('other').describe('Use "home" for flatmates.'),
+        members: z.array(z.string().max(120)).max(50).default([]).describe('Friend names, or email addresses to invite someone new. "Priya Sharma <priya@example.com>" works too. You are added automatically.'),
+        simplify_by_default: z.boolean().optional().describe('Turn on Splitwise debt simplification for this group.'),
+        idempotency_key: z.string().max(64).optional(),
+      }),
+      outputSchema: GroupOutput,
+      annotations: WRITE,
+    },
+    timed(deps.metrics, 'create_group', async (args, ctx) => {
+      const denied = missingScope(ctx, 'add');
+      if (denied) return denied;
+      const me = await deps.me();
+      const pending = ctx.mcpReq.requestState<PendingWrite>();
+
+      if (pending && pending.kind === 'create_group') {
+        if (pending.userId !== me.id) return fail('This confirmation belongs to a different Splitwise account. Start again.');
+        const payload = pending.payload as GroupPayload;
+        const answer = acceptedContent(ctx.mcpReq.inputResponses, 'confirm', ConfirmSchema);
+        if (!answer || answer.confirm !== true || declined(ctx.mcpReq.inputResponses)) {
+          deps.metrics.emit({ type: 'preview_declined', tool: 'create_group' });
+          return ok('Cancelled. No group was created.', { created: false, note: 'Cancelled by the user.' });
+        }
+        deps.metrics.emit({ type: 'preview_confirmed', tool: 'create_group' });
+        const existing = await deps.writeLog.find(String(me.id), pending.fingerprint, pending.idempotencyKey);
+        if (existing) {
+          deps.metrics.emit({ type: 'duplicate_blocked', tool: 'create_group', source: 'write_log' });
+          return ok(`A group called "${payload.name}" was already created (#${existing.expenseId}). Nothing new was created.`, {
+            created: false,
+            group_id: existing.expenseId,
+            note: 'A matching group was created in the last 48 hours. Refused to create it again.',
+          });
+        }
+        const group = await deps.client.createGroup(payload.body);
+        deps.metrics.emit({ type: 'write_posted', tool: 'create_group' });
+        await deps.writeLog.record(String(me.id), {
+          fingerprint: pending.fingerprint,
+          ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
+          expenseId: group.id,
+          createdAt: deps.now().toISOString(),
+          description: payload.name,
+        });
+        const invited = payload.members.filter((m) => m.status === 'invited').length;
+        return ok(
+          `Created "${payload.name}" (${payload.groupType}) with ${payload.members.length} other ${payload.members.length === 1 ? 'person' : 'people'}${invited ? `, ${invited} of whom will get an invitation email` : ''}. ${GROUP_URL(group.id)}`,
+          { created: true, group_id: group.id, name: payload.name, group_type: payload.groupType, url: GROUP_URL(group.id), members: payload.members, note: 'Created. Add expenses to it with add_expense.' },
+        );
+      }
+
+      // Round 1.
+      const name = untrusted(args.name, 80);
+      const friends = await deps.client.friends();
+      const resolved: Invitee[] = args.members.map((ref) => resolveInvitee(ref, friends, me.id));
+      const bad = resolved.filter((r): r is Extract<Invitee, { kind: 'unresolved' }> => r.kind === 'unresolved');
+      if (bad.length) {
+        return fail(
+          `Could not work out who ${bad.length === 1 ? 'this is' : 'these are'}:\n${bad.map((b) => `  "${untrusted(b.ref, 60)}": ${b.reason}`).join('\n')}\nGive an email address to invite someone who is not already your friend on Splitwise. Nothing was created.`,
+        );
+      }
+
+      const body: SwCreateGroup = { name, group_type: args.group_type };
+      if (args.simplify_by_default !== undefined) body.simplify_by_default = args.simplify_by_default;
+      const members: GroupPayload['members'] = [];
+      let i = 0;
+      for (const r of resolved) {
+        if (r.kind === 'existing') {
+          if (r.user.id === me.id) continue;
+          body[`users__${i}__user_id`] = r.user.id;
+          members.push({ name: fullName(r.user), status: 'already_on_splitwise' });
+        } else if (r.kind === 'invite') {
+          body[`users__${i}__first_name`] = r.firstName;
+          if (r.lastName) body[`users__${i}__last_name`] = r.lastName;
+          body[`users__${i}__email`] = r.email;
+          members.push({ name: `${[r.firstName, r.lastName].filter(Boolean).join(' ')} <${r.email}>`, status: 'invited' });
+        }
+        i += 1;
+      }
+
+      const fp = `group|${me.id}|${name.toLowerCase()}|${members.map((m) => m.name).sort().join(',')}`;
+      const already = await deps.writeLog.find(String(me.id), fp, args.idempotency_key);
+      if (already) {
+        deps.metrics.emit({ type: 'duplicate_blocked', tool: 'create_group', source: 'write_log' });
+        return ok(`"${name}" was already created (#${already.expenseId}) within the last 48 hours. Nothing new was created.`, {
+          created: false,
+          group_id: already.expenseId,
+          note: 'Duplicate of a recent group created by this connector. Refused.',
+        });
+      }
+
+      const known = members.filter((m) => m.status === 'already_on_splitwise');
+      const invites = members.filter((m) => m.status === 'invited');
+      const lines = [`Create a ${args.group_type} group called "${name}" with you in it.`];
+      if (known.length) lines.push(`  Adding, already on Splitwise: ${known.map((m) => m.name).join(', ')}`);
+      if (invites.length) lines.push(`  Inviting by email (they will receive a real invitation): ${invites.map((m) => m.name).join(', ')}`);
+      if (!members.length) lines.push('  Nobody else yet. You can add people later with add_to_group.');
+
+      deps.metrics.emit({ type: 'preview_shown', tool: 'create_group' });
+      const payload: GroupPayload = { body, name, groupType: args.group_type, members };
+      const state = await deps.codec.mint({
+        kind: 'create_group',
+        userId: me.id,
+        fingerprint: fp,
+        ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
+        payload,
+      });
+      return inputRequired({
+        inputRequests: { confirm: inputRequired.elicit({ message: `${lines.join('\n')}\n\nCreate it?`, requestedSchema: ConfirmSchema }) },
+        requestState: state,
+      });
+    }),
+  );
+
+  server.registerTool(
+    'add_to_group',
+    {
+      title: 'Add people to a group',
+      description:
+        'Add one or more people to an existing Splitwise group. Name existing friends, or give an email address to invite someone new. Anyone already in the group is skipped. Shows a preview and waits for confirmation, because an email sends a real invitation and everyone added can see the whole group history. This connector cannot remove anyone; do that in the Splitwise app.',
+      inputSchema: z.object({
+        group_id: z.number().int(),
+        members: z.array(z.string().max(120)).min(1).max(50).describe('Friend names, or email addresses to invite someone new.'),
+      }),
+      outputSchema: AddMembersOutput,
+      annotations: WRITE,
+    },
+    timed(deps.metrics, 'add_to_group', async (args, ctx) => {
+      const denied = missingScope(ctx, 'add');
+      if (denied) return denied;
+      const me = await deps.me();
+      const pending = ctx.mcpReq.requestState<PendingWrite>();
+
+      if (pending && pending.kind === 'add_to_group') {
+        if (pending.userId !== me.id) return fail('This confirmation belongs to a different Splitwise account. Start again.');
+        const payload = pending.payload as AddMembersPayload;
+        const answer = acceptedContent(ctx.mcpReq.inputResponses, 'confirm', ConfirmSchema);
+        if (!answer || answer.confirm !== true || declined(ctx.mcpReq.inputResponses)) {
+          deps.metrics.emit({ type: 'preview_declined', tool: 'add_to_group' });
+          return ok('Cancelled. Nobody was added.', { added: false, group_id: payload.groupId, note: 'Cancelled by the user.' });
+        }
+        deps.metrics.emit({ type: 'preview_confirmed', tool: 'add_to_group' });
+        // One call per person, so a failure halfway leaves the earlier ones
+        // added. Report per person rather than pretending it was atomic.
+        const results: { name: string; status: 'already_on_splitwise' | 'invited' | 'failed'; detail?: string }[] = [];
+        for (const addition of payload.additions) {
+          try {
+            await deps.client.addUserToGroup(addition.body);
+            results.push({ name: addition.name, status: addition.status });
+          } catch (err) {
+            results.push({ name: addition.name, status: 'failed', detail: (err as Error).message });
+          }
+        }
+        const failed = results.filter((r) => r.status === 'failed');
+        if (results.some((r) => r.status !== 'failed')) deps.metrics.emit({ type: 'write_posted', tool: 'add_to_group' });
+        const summary = results.filter((r) => r.status !== 'failed').map((r) => r.name);
+        return ok(
+          [
+            summary.length ? `Added to "${payload.groupName}": ${summary.join(', ')}.` : `Nobody was added to "${payload.groupName}".`,
+            ...failed.map((f) => `Failed for ${f.name}: ${f.detail}`),
+          ].join('\n'),
+          { added: summary.length > 0, group_id: payload.groupId, group_name: payload.groupName, members: results, note: failed.length ? 'Some additions failed; see the list.' : 'Everyone named was added.' },
+        );
+      }
+
+      // Round 1.
+      const group = await deps.group(args.group_id);
+      const friends = await deps.client.friends();
+      const alreadyIn = new Set(group.members.map((m) => m.id));
+      // Anyone who is both a friend and a member would otherwise appear twice
+      // and resolve as ambiguous, so dedupe by id before matching names.
+      const candidates = [...new Map([...friends, ...group.members].map((u) => [u.id, u])).values()];
+      const resolved = args.members.map((ref) => ({ ref, r: resolveInvitee(ref, candidates, me.id) }));
+      const bad = resolved.filter((x) => x.r.kind === 'unresolved');
+      if (bad.length) {
+        return fail(
+          `Could not work out who ${bad.length === 1 ? 'this is' : 'these are'}:\n${bad.map((b) => `  "${untrusted(b.ref, 60)}": ${(b.r as { reason: string }).reason}`).join('\n')}\nGive an email address to invite someone new. Nobody was added.`,
+        );
+      }
+
+      const additions: AddMembersPayload['additions'] = [];
+      const skipped: string[] = [];
+      for (const { r } of resolved) {
+        if (r.kind === 'existing') {
+          if (alreadyIn.has(r.user.id)) {
+            skipped.push(fullName(r.user));
+            continue;
+          }
+          additions.push({ body: { group_id: group.id, user_id: r.user.id }, name: fullName(r.user), status: 'already_on_splitwise' });
+        } else if (r.kind === 'invite') {
+          additions.push({
+            body: { group_id: group.id, first_name: r.firstName, last_name: r.lastName || r.firstName, email: r.email },
+            name: `${[r.firstName, r.lastName].filter(Boolean).join(' ')} <${r.email}>`,
+            status: 'invited',
+          });
+        }
+      }
+
+      if (!additions.length) {
+        return ok(
+          skipped.length ? `${joinNames(skipped)} ${skipped.length === 1 ? 'is' : 'are'} already in "${untrusted(group.name, 60)}". Nobody to add.` : 'Nobody to add.',
+          { added: false, group_id: group.id, group_name: untrusted(group.name, 60), note: 'Everyone named is already in the group.' },
+        );
+      }
+
+      const known = additions.filter((a) => a.status === 'already_on_splitwise');
+      const invites = additions.filter((a) => a.status === 'invited');
+      const lines = [`Add ${additions.length} ${additions.length === 1 ? 'person' : 'people'} to "${untrusted(group.name, 60)}", which has ${group.members.length} ${group.members.length === 1 ? 'member' : 'members'} today. They will see the group's whole expense history.`];
+      if (known.length) lines.push(`  Already on Splitwise: ${known.map((a) => a.name).join(', ')}`);
+      if (invites.length) lines.push(`  Inviting by email (they will receive a real invitation): ${invites.map((a) => a.name).join(', ')}`);
+      if (skipped.length) lines.push(`  Skipping, already in the group: ${skipped.join(', ')}`);
+
+      deps.metrics.emit({ type: 'preview_shown', tool: 'add_to_group' });
+      const payload: AddMembersPayload = { groupId: group.id, groupName: untrusted(group.name, 60), additions };
+      const state = await deps.codec.mint({ kind: 'add_to_group', userId: me.id, fingerprint: `addto|${group.id}|${additions.map((a) => a.name).sort().join(',')}`, payload });
+      return inputRequired({
+        inputRequests: { confirm: inputRequired.elicit({ message: `${lines.join('\n')}\n\nAdd them?`, requestedSchema: ConfirmSchema }) },
         requestState: state,
       });
     }),

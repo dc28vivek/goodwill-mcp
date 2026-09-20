@@ -9,7 +9,7 @@ import { staleBalances } from '../domain/stale.js';
 import type { Deps } from '../server/deps.js';
 import { GROUP_URL, fail, fullName, missingScope, ok, timed, untrusted } from '../server/format.js';
 import { describeResolution, resolveMember } from '../server/resolve.js';
-import type { SwGroup, SwUser } from '../splitwise/types.js';
+import type { SwUser } from '../splitwise/types.js';
 import { ExplainOutput, MissingOutput, OverallOutput, ReconcileOutput, SettleOutput, StaleOutput, TransactionInput } from './schemas.js';
 
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
@@ -58,7 +58,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         }
       } else {
         const friends = await deps.client.friends();
-        const r = resolveMember({ members: friends.map((f) => ({ ...f, balance: f.balance })) } as Pick<SwGroup, 'members'>, friend!, me.id);
+        const r = resolveMember({ members: friends }, friend!, me.id);
         if (!r.ok) return fail(describeResolution(friend!, r));
         counterparties = [r.user];
         expenses = (await deps.client.allExpenses({ friend_id: r.user.id })).filter((e) => e.group_id === null || e.group_id === 0);

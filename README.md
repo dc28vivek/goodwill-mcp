@@ -42,10 +42,11 @@ Your key stays on your machine. Nothing is sent anywhere except Splitwise's own 
 - *"How do we settle Lisbon?"* — the fewest payments that close the group
 - *"Add dinner 84, I paid, split with everyone"* — shows the split and who it affects, then waits
 - *"Here's a photo of the bill — I had the steak, Priya had the salad"* — splits by item, tax and tip in proportion
+- *"Create a Goa Trip group with Priya and Sam"* — then add expenses to it
 - *"Priya paid me back, record it"* — closes the balance
 - *"Remind Sam, gently"* — drafts a comment in the tone you pick, then waits
 
-Ten tools, three resources, one prompt:
+Twelve tools, three resources, one prompt:
 
 | Tool | What it does | Writes? |
 |---|---|---|
@@ -55,6 +56,8 @@ Ten tools, three resources, one prompt:
 | `stale_balances` | Who is late, by how long | no |
 | `settle_plan` | Minimum payments to close a group, checked against Splitwise | no |
 | `find_duplicates` | Likely duplicates with a confidence and a suggested action | no |
+| `create_group` | A new group, with friends added and strangers invited by email | after confirmation |
+| `add_to_group` | People added to an existing group | after confirmation |
 | `add_expense` | A sentence or fields, a preview, then a confirmed post | after confirmation |
 | `split_by_items` | A receipt split line by line, tax and tip allocated proportionally | after confirmation |
 | `settle_up` | Records a payment that already happened, closing the balance | after confirmation |

@@ -155,3 +155,21 @@ export const ItemSplitOutput = z.object({
   breakdown: z.array(z.object({ person: Person, items: Money, extras: Money, owes: Money })).optional(),
   note: z.string(),
 });
+
+export const GroupOutput = z.object({
+  created: z.boolean(),
+  group_id: z.number().optional(),
+  name: z.string().optional(),
+  group_type: z.string().optional(),
+  url: z.string().optional(),
+  members: z.array(z.object({ name: z.string(), status: z.enum(['already_on_splitwise', 'invited']) })).optional(),
+  note: z.string(),
+});
+
+export const AddMembersOutput = z.object({
+  added: z.boolean(),
+  group_id: z.number(),
+  group_name: z.string().optional(),
+  members: z.array(z.object({ name: z.string(), status: z.enum(['already_on_splitwise', 'invited', 'failed']), detail: z.string().optional() })).optional(),
+  note: z.string(),
+});

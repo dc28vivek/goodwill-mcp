@@ -176,6 +176,35 @@
     writes.create_expense: 1
   note: The text is posted as data. The model never sees it as an instruction because the preview quotes it.
 
+- id: create-group-mixed
+  prompt: "Create a Goa Trip group with Priya and invite nisha.rao@example.com"
+  tool: create_group
+  args: { name: "Goa Trip", group_type: trip, members: ["Priya", "nisha.rao@example.com"] }
+  answer: accept
+  expect:
+    structured.created: true
+    prompt_includes: ["Adding, already on Splitwise: Priya S", "Inviting by email (they will receive a real invitation)"]
+    writes.create_group: 1
+
+- id: create-group-unknown-name
+  prompt: "Create a group with someone whose name I got wrong"
+  tool: create_group
+  args: { name: "Mystery", members: ["Zed"] }
+  expect:
+    isError: true
+    text_includes: ["Nothing was created"]
+    writes.create_group: 0
+
+- id: add-to-group-skips-existing
+  prompt: "Add Priya and nisha@example.com to Lisbon"
+  tool: add_to_group
+  args: { group_id: 100, members: ["Priya", "nisha@example.com"] }
+  answer: accept
+  expect:
+    structured.added: true
+    prompt_includes: ["Skipping, already in the group: Priya S", "whole expense history"]
+    writes.add_user_to_group: 1
+
 - id: settle-full
   prompt: "Priya paid me back for Lisbon, record it"
   tool: settle_up

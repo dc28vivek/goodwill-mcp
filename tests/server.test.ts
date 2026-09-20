@@ -32,7 +32,7 @@ describe('goodwill server', () => {
   it('lists six tools with honest annotations and fixed order', async () => {
     const { client } = await connect(state);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'split_by_items', 'settle_up', 'nudge']);
+    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up', 'nudge']);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.explain_balance?.annotations?.readOnlyHint).toBe(true);
     expect(byName.add_expense?.annotations?.readOnlyHint).toBe(false);
@@ -308,5 +308,48 @@ describe('goodwill server', () => {
     const sc = r.structuredContent as { balances: { contributions: unknown[] }[] };
     expect(sc.balances[0]?.contributions).toHaveLength(2);
     expect(String((r.content[0] as { text: string }).text)).toContain('Dinner at Cervejaria');
+  });
+
+  it('creates a group, separating known friends from email invitations', async () => {
+    const { client, prompts } = await connect(state, true);
+    const r = await client.callTool({
+      name: 'create_group',
+      arguments: { name: 'Goa Trip', group_type: 'trip', members: ['Priya', 'nisha.rao@example.com'] },
+    });
+    expect(prompts[0]).toContain('Adding, already on Splitwise: Priya S');
+    expect(prompts[0]).toContain('Inviting by email (they will receive a real invitation): Nisha Rao <nisha.rao@example.com>');
+    const sc = r.structuredContent as { created: boolean; group_id: number; members: { status: string }[] };
+    expect(sc.created).toBe(true);
+    expect(sc.members.map((m) => m.status)).toEqual(['already_on_splitwise', 'invited']);
+    const body = state.writes.find((w) => w.path === '/create_group')?.body as Record<string, unknown>;
+    expect(body.name).toBe('Goa Trip');
+    expect(body.users__0__user_id).toBe(2);
+    expect(body.users__1__email).toBe('nisha.rao@example.com');
+  });
+
+  it('refuses to create a group when a name cannot be resolved', async () => {
+    const { client } = await connect(state, true);
+    const r = await client.callTool({ name: 'create_group', arguments: { name: 'Mystery', members: ['Zed'] } });
+    expect(r.isError).toBe(true);
+    expect((r.content[0] as { text: string }).text).toContain('Nothing was created');
+    expect(state.writes).toHaveLength(0);
+  });
+
+  it('adds people to an existing group and skips those already in it', async () => {
+    const { client, prompts } = await connect(state, true);
+    const r = await client.callTool({ name: 'add_to_group', arguments: { group_id: 100, members: ['Priya', 'nisha@example.com'] } });
+    expect(prompts[0]).toContain('Skipping, already in the group: Priya S');
+    expect(prompts[0]).toContain("They will see the group's whole expense history");
+    const sc = r.structuredContent as { added: boolean; members: { name: string; status: string }[] };
+    expect(sc.added).toBe(true);
+    expect(sc.members).toHaveLength(1);
+    expect(sc.members[0]?.status).toBe('invited');
+  });
+
+  it('says so when everyone named is already in the group', async () => {
+    const { client } = await connect(state, true);
+    const r = await client.callTool({ name: 'add_to_group', arguments: { group_id: 100, members: ['Priya', 'Sam'] } });
+    expect((r.structuredContent as { added: boolean }).added).toBe(false);
+    expect(state.writes).toHaveLength(0);
   });
 });

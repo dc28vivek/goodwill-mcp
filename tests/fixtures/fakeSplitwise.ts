@@ -122,6 +122,40 @@ export function fakeFetch(state: FakeState): typeof fetch {
       state.comments.push(c);
       return json({ comment: c });
     }
+    if (path === '/create_group') {
+      state.writes.push({ path, body });
+      state.nextId += 1;
+      const members: SwGroup['members'] = [{ ...state.me, balance: [] }];
+      for (let i = 0; ; i += 1) {
+        const uid = body[`users__${i}__user_id`];
+        const email = body[`users__${i}__email`];
+        if (uid === undefined && email === undefined) break;
+        if (uid !== undefined) {
+          const known = state.groups[0]!.members.find((m) => m.id === Number(uid));
+          if (known) members.push({ ...known, balance: [] });
+        } else {
+          state.nextId += 1;
+          members.push({ id: state.nextId, first_name: String(body[`users__${i}__first_name`] ?? 'Friend'), last_name: String(body[`users__${i}__last_name`] ?? ''), email: String(email), registration_status: 'invited', balance: [] });
+        }
+      }
+      const created: SwGroup = { id: state.nextId + 1000, name: String(body.name), group_type: (body.group_type as SwGroup['group_type']) ?? 'other', updated_at: new Date().toISOString(), simplify_by_default: Boolean(body.simplify_by_default), members, original_debts: [], simplified_debts: [] };
+      state.groups.push(created);
+      return json({ group: created });
+    }
+    if (path === '/add_user_to_group') {
+      state.writes.push({ path, body });
+      const g = state.groups.find((x) => x.id === Number(body.group_id));
+      if (!g) return json({ success: false, errors: { base: ['group not found'] } });
+      let user;
+      if (body.user_id !== undefined) {
+        user = state.groups[0]!.members.find((m) => m.id === Number(body.user_id)) ?? { id: Number(body.user_id), first_name: 'Someone', last_name: null };
+      } else {
+        state.nextId += 1;
+        user = { id: state.nextId, first_name: String(body.first_name), last_name: String(body.last_name), email: String(body.email), registration_status: 'invited' as const };
+      }
+      g.members.push({ ...user, balance: [] });
+      return json({ success: true, user });
+    }
     if (path === '/get_categories') return json({ categories: [{ id: 1, name: 'Utilities', subcategories: [{ id: 5, name: 'Electricity' }] }, { id: 25, name: 'Food and drink', subcategories: [{ id: 13, name: 'Dining out' }] }] });
     if (path === '/get_currencies') return json({ currencies: [{ currency_code: 'EUR', unit: '€' }, { currency_code: 'USD', unit: '$' }, { currency_code: 'INR', unit: '₹' }] });
     return json({ errors: { base: [`Unknown path ${path}`] } }, 404);

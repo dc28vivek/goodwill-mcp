@@ -64,7 +64,7 @@ async function main() {
     checks.push(['server identifies itself', info?.name === 'goodwill-mcp', `name=${info?.name}`]);
 
     const { tools } = await client.listTools();
-    checks.push(['ten tools listed', tools.length === 10, tools.map((t) => t.name).join(', ')]);
+    checks.push(['twelve tools listed', tools.length === 12, tools.map((t) => t.name).join(', ')]);
 
     const res = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Priya' } });
     const b = (res.structuredContent as { balances?: { charged?: string; remaining?: string }[] })?.balances?.[0];
