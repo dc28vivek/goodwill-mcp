@@ -76,3 +76,20 @@ export function timed<A, C extends { mcpReq: { inputResponses?: Record<string, u
     }
   };
 }
+
+/**
+ * Render a person as "you" when they are the signed-in user.
+ *
+ * The server knows who is asking, so naming them in the third person reads
+ * like a report about a stranger. Structured output keeps real names, because
+ * a machine reader needs them unambiguous; only prose uses "you".
+ */
+export function who(user: { id: number; first_name: string; last_name?: string | null } | null | undefined, meId: number): string {
+  if (user && user.id === meId) return 'you';
+  return fullName(user);
+}
+
+/** Capitalise a rendered name for the start of a sentence. */
+export function sentenceCase(name: string): string {
+  return name === 'you' ? 'You' : name;
+}

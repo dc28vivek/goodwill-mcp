@@ -56,6 +56,7 @@ export const SettleOutput = z.object({
     z.object({
       currency: z.string(),
       payments: z.array(z.object({ from: Person, to: Person, amount: Money })),
+      yours: z.number().describe('How many of these payments you are part of.'),
       matches_splitwise: z.boolean().describe('True when this plan equals the simplified debts Splitwise shows in the app.'),
     }),
   ),
@@ -185,6 +186,7 @@ export const ExpenseRow = z.object({
   cost: Money.describe('What the whole expense cost.'),
   currency: z.string(),
   paid_by: z.string(),
+  paid_by_you: z.boolean(),
   your_share: Money.describe('What you owe for it. "0.00" if none.'),
   share_percent: z.number().nullable(),
   split_between: z.number().describe('How many people share it.'),

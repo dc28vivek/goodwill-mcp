@@ -43,7 +43,7 @@
   expect:
     isError: false
     structured.returned: 3
-    text_includes: ["paid by Vivek D, your share 28.00, split 3 ways"]
+    text_includes: ["paid by you, your share 28.00, split 3 ways"]
 
 - id: list-excludes-payments
   prompt: "What did we spend on in September?"
@@ -59,7 +59,7 @@
   args: { expense_id: 1001 }
   expect:
     isError: false
-    text_includes: ["paid by Vivek D", "owes"]
+    text_includes: ["paid by you", "owes"]
 
 - id: explain-priya
   model: true
@@ -196,6 +196,8 @@
     isError: false
     structured.plans.0.payments.length: 2
     structured.plans.0.matches_splitwise: true
+    structured.plans.0.yours: 2
+    text_includes: ["Priya S pays you 61.00 EUR", "You would receive 81.00 in total."]
 
 - id: reconcile-clean
   model: true

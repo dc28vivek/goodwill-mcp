@@ -421,7 +421,8 @@ describe('goodwill server', () => {
     expect(sc.returned).toBe(3);
     const dinner = sc.expenses.find((e) => e.description.startsWith('Dinner'));
     expect(dinner).toMatchObject({ paid_by: 'Vivek D', your_share: '28.00', split_between: 3 });
-    expect(String((r.content[0] as { text: string }).text)).toContain('paid by Vivek D, your share 28.00, split 3 ways');
+    // The signed-in user reads as "you", not as their own name.
+    expect(String((r.content[0] as { text: string }).text)).toContain('paid by you, your share 28.00, split 3 ways');
   });
 
   it('leaves settle-up payments out of spending unless asked', async () => {
@@ -600,4 +601,38 @@ describe('goodwill server', () => {
     expect(String((r.content[0] as { text: string }).text)).toContain('Nothing involving you');
   });
 
+
+  it('centres the settle plan on you, and says how many payments are not yours', async () => {
+    // Give the group a debt between two other members as well as ones involving me.
+    state.groups[0]!.members = state.groups[0]!.members.map((m) =>
+      m.id === 4 ? { ...m, balance: [{ currency_code: 'EUR', amount: '-10.00' }] } : m.id === 5 ? { ...m, balance: [{ currency_code: 'EUR', amount: '10.00' }] } : m,
+    );
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'settle_plan', arguments: { group_id: 100 } });
+    const text = String((r.content[0] as { text: string }).text);
+    expect(text).toContain('Priya S pays you 61.00 EUR');
+    expect(text).not.toContain('pays Vivek D');
+    expect(text).toContain('You would receive 81.00 in total.');
+    expect(text).toContain('1 other payment between other people is not listed.');
+  });
+
+  it('shows the whole group plan when asked for everything', async () => {
+    state.groups[0]!.members = state.groups[0]!.members.map((m) =>
+      m.id === 4 ? { ...m, balance: [{ currency_code: 'EUR', amount: '-10.00' }] } : m.id === 5 ? { ...m, balance: [{ currency_code: 'EUR', amount: '10.00' }] } : m,
+    );
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'settle_plan', arguments: { group_id: 100, everything: true } });
+    const text = String((r.content[0] as { text: string }).text);
+    expect(text).toContain('Alex Ahuja pays Alex Brown 10.00 EUR');
+    expect(text).not.toContain('not listed');
+  });
+
+  it('names you as you in a single expense breakdown', async () => {
+    const { client } = await connect(state);
+    const dinner = state.expenses.find((e) => e.description.startsWith('Dinner'))!;
+    const r = await client.callTool({ name: 'read_expense', arguments: { expense_id: dinner.id } });
+    const text = String((r.content[0] as { text: string }).text);
+    expect(text).toContain('paid by you');
+    expect(text).toMatch(/^\s*You\s+paid/m);
+  });
 });
