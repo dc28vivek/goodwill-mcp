@@ -72,6 +72,13 @@ export function fakeFetch(state: FakeState): typeof fetch {
       if (before) list = list.filter((e) => e.date <= before);
       return json({ expenses: list.slice(offset, offset + limit) });
     }
+    if (path.startsWith('/get_expense/')) {
+      const id = Number(path.split('/').pop());
+      const found = state.expenses.find((e) => e.id === id);
+      if (!found) return json({ errors: { base: ['Invalid API Request: record not found'] } }, 404);
+      const comments = state.comments.filter((c) => c.relation_id === id);
+      return json({ expense: { ...found, comments, comments_count: comments.length } });
+    }
     if (path === '/create_expense') {
       state.writes.push({ path, body });
       const users: SwExpense['users'] = [];

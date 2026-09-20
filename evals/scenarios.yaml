@@ -6,6 +6,35 @@
 # these arguments from the plain sentence in `prompt`. Write scenarios are not
 # model-driven because the confirmation needs a person.
 
+- id: was-rent-split
+  model: true
+  model_args_include: { group_id: 100 }
+  # The model must pick list_expenses and judge "rent" itself. No server-side
+  # matcher owns that word.
+  prompt: "Was rent split this month in the Lisbon group (id 100)?"
+  tool: list_expenses
+  args: { group_id: 100, since: "2026-09-01", until: "2026-09-30" }
+  expect:
+    isError: false
+    structured.returned: 3
+    text_includes: ["paid by Vivek D, your share 28.00, split 3 ways"]
+
+- id: list-excludes-payments
+  prompt: "What did we spend on in September?"
+  tool: list_expenses
+  args: { group_id: 100, since: "2026-09-01" }
+  expect:
+    isError: false
+    structured.returned: 3
+
+- id: read-one-expense
+  prompt: "Show me everything about that dinner"
+  tool: read_expense
+  args: { expense_id: 1001 }
+  expect:
+    isError: false
+    text_includes: ["paid by Vivek D", "owes"]
+
 - id: explain-priya
   model: true
   prompt: "Why does Priya owe me money in Lisbon?"

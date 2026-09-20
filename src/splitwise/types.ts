@@ -80,6 +80,7 @@ export interface SwExpense {
   deleted_at: string | null;
   payment: boolean;
   repeats: boolean;
+  comments_count?: number;
   category: { id: number; name: string };
   created_by: SwUser | null;
   users: SwShare[];

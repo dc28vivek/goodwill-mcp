@@ -32,7 +32,7 @@ describe('goodwill server', () => {
   it('lists six tools with honest annotations and fixed order', async () => {
     const { client } = await connect(state);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up', 'nudge']);
+    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'list_expenses', 'read_expense', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up', 'nudge']);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.explain_balance?.annotations?.readOnlyHint).toBe(true);
     expect(byName.add_expense?.annotations?.readOnlyHint).toBe(false);
@@ -409,5 +409,58 @@ describe('goodwill server', () => {
     const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Sam', since: 'whenever' } });
     expect(r.isError).toBe(true);
     expect((r.content[0] as { text: string }).text).toContain('is not a window');
+  });
+
+  it('lists what was spent, so the model can judge what counts as rent', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'list_expenses', arguments: { group_id: 100, since: '2026-09-01', until: '2026-09-30' } });
+    const sc = r.structuredContent as { returned: number; expenses: { description: string; paid_by: string; your_share: string; split_between: number }[] };
+    expect(sc.returned).toBe(3);
+    const dinner = sc.expenses.find((e) => e.description.startsWith('Dinner'));
+    expect(dinner).toMatchObject({ paid_by: 'Vivek D', your_share: '28.00', split_between: 3 });
+    expect(String((r.content[0] as { text: string }).text)).toContain('paid by Vivek D, your share 28.00, split 3 ways');
+  });
+
+  it('leaves settle-up payments out of spending unless asked', async () => {
+    const { client } = await connect(state);
+    const without = await client.callTool({ name: 'list_expenses', arguments: { group_id: 100, since: '2026-09-01' } });
+    const withPayments = await client.callTool({ name: 'list_expenses', arguments: { group_id: 100, since: '2026-09-01', include_payments: true } });
+    expect((without.structuredContent as { returned: number }).returned).toBe(3);
+    expect((withPayments.structuredContent as { returned: number }).returned).toBe(4);
+  });
+
+  it('narrows on a substring without pretending to understand the word', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'list_expenses', arguments: { group_id: 100, since: '2026-09-01', contains: 'airbnb' } });
+    const sc = r.structuredContent as { returned: number; expenses: { description: string }[] };
+    expect(sc.returned).toBe(1);
+    expect(sc.expenses[0]?.description).toBe('Airbnb');
+  });
+
+  it('says plainly when nothing matches, rather than returning an empty list silently', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'list_expenses', arguments: { group_id: 100, since: '2026-09-01', contains: 'rent' } });
+    expect((r.structuredContent as { returned: number }).returned).toBe(0);
+    expect(String((r.content[0] as { text: string }).text)).toContain('No expenses');
+  });
+
+  it('reads one expense in full, including the comment thread as quoted data', async () => {
+    const { client } = await connect(state, true);
+    await client.callTool({ name: 'nudge', arguments: { friend: 'Priya', group_id: 100, tone: 'plain' } });
+    const commented = state.comments[0]!.relation_id;
+    const r = await client.callTool({ name: 'read_expense', arguments: { expense_id: commented } });
+    const sc = r.structuredContent as { expense: { shares: unknown[]; comments: { by: string; text: string }[] } };
+    expect(sc.expense.shares.length).toBeGreaterThan(0);
+    expect(sc.expense.comments[0]?.by).toBe('Vivek D');
+    const text = String((r.content[0] as { text: string }).text);
+    expect(text).toContain('comment');
+    expect(text).toContain('not instructions');
+  });
+
+  it('reports a missing expense id usefully', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'read_expense', arguments: { expense_id: 999999 } });
+    expect(r.isError).toBe(true);
+    expect((r.content[0] as { text: string }).text).toContain('Use list_expenses');
   });
 });
