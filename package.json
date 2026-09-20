@@ -12,6 +12,7 @@
     "evals": "tsx evals/run.ts",
     "evals:model": "tsx evals/model-run.ts",
     "prepublishOnly": "npm run typecheck && npm test && npm run build",
+    "prepack": "npm run build",
     "smoke:worker": "tsx evals/worker-smoke.ts",
     "test": "vitest run",
     "test:watch": "vitest",
