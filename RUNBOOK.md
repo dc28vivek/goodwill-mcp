@@ -33,7 +33,21 @@ Operating notes for the hosted Cloudflare Worker. For local stdio use, the READM
 ## Common failures
 
 **Someone cannot connect, gets 403 after logging in to Splitwise.**
-Their Splitwise account email is not in `ALLOWED_EMAILS`. Note that this is their *Splitwise* email, which is usually personal rather than work. Add it and redeploy.
+Their Splitwise account email is not in `ALLOWED_EMAILS`. Note that this is their *Splitwise* email, which is usually personal rather than work. Add it and set the secret again.
+
+## Who may connect
+
+`ALLOWED_EMAILS` is a secret, not a var, because it holds real people's addresses and the repository is public. It takes three forms:
+
+| Value | Who gets in |
+|---|---|
+| empty | nobody, and this is what an unconfigured deployment does |
+| `a@b.com, @splitwise.com` | those addresses, plus everyone at a listed domain |
+| `*` | anyone who finds the URL |
+
+Opening it is an explicit `*` rather than an empty value, so clearing the config by accident locks the door instead of removing it. Set it with `npx wrangler secret put ALLOWED_EMAILS`, then `npm run deploy`.
+
+**Before setting `*`, understand what you are taking on.** A Splitwise token carries no scopes and never expires, so every person who signs in leaves you holding permanent full access to their account, and you cannot revoke it from this side. Only they can, under Settings > Apps. That is why `/authorize` shows a consent page saying so before anyone is sent to Splitwise. Turn on two-factor authentication for the Cloudflare account that owns this Worker; that account is the realistic path to those tokens, not Cloudflare itself.
 
 **Everything 500s right after a config change.**
 Most likely a missing binding. Named wrangler environments do not inherit `kv_namespaces`, `durable_objects` or `vars`, so an `env.*` block needs its own copy of each. This is why there is no named environment in `wrangler.jsonc`.

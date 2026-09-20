@@ -26,6 +26,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import { createMcpHandler, hostHeaderValidationResponse, preloadSchemas } from '@modelcontextprotocol/server';
 import { OtlpTracer, type Tracer, noopTracer, parseTraceparent } from './obs/trace.js';
 import { buildServer, SERVER_INFO } from './server/build.js';
+import { allowed, isOpen } from './server/access.js';
 import { bindingDigest, newBinding, readCookie, safeEqual, signState, verifyState } from './server/authState.js';
 import { createDeps } from './server/env.js';
 import { WorkersCache } from './splitwise/cache.js';
@@ -103,12 +104,33 @@ function html(body: string, status = 200): Response {
   );
 }
 
-function allowed(env: Env, email: string): boolean {
-  const list = (env.ALLOWED_EMAILS ?? '')
-    .split(',')
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  return list.includes(email.toLowerCase());
+/**
+ * What a person is agreeing to, shown before they are sent to Splitwise.
+ *
+ * Splitwise tokens carry no scopes and never expire, so "sign in with
+ * Splitwise" understates what is happening by a wide margin. This connector
+ * previews every write before making it; showing people what they are handing
+ * over, before they hand it over, is the same principle pointed at itself.
+ */
+function consentPage(origin: string, clientName: string, splitwiseUrl: string): Response {
+  return html(
+    `<h1>Connect Splittab</h1>
+     <p><strong>${clientName}</strong> wants to read and change your Splitwise data through this server.</p>
+     <h2 style="font-size:1.05rem;margin-bottom:.3rem">What you are granting</h2>
+     <ul style="padding-left:1.1rem;line-height:1.55">
+       <li>Splitwise issues access tokens that <strong>carry no scopes and never expire</strong>. There is no read-only version to give.</li>
+       <li>This server stores that token encrypted, and uses it only to answer your requests.</li>
+       <li>It never deletes anything, and it asks you to confirm every expense, payment or group it creates or changes.</li>
+       <li>Anything it adds or edits gets a comment on the expense saying so, visible to everyone on it.</li>
+     </ul>
+     <h2 style="font-size:1.05rem;margin-bottom:.3rem">Taking it back</h2>
+     <p>Revoke at any time in Splitwise under <strong>Settings &gt; Apps</strong>. That kills the token immediately and nothing here can use it again.</p>
+     <p style="margin-top:1.5rem">
+       <a href="${splitwiseUrl}" style="display:inline-block;background:#1cc29f;color:#fff;padding:.6rem 1.1rem;border-radius:6px;text-decoration:none;font-weight:600">Continue to Splitwise</a>
+       <span style="margin-left:1rem;color:#666">or close this tab to cancel</span>
+     </p>
+     <p style="margin-top:2rem;color:#666;font-size:.9rem">Splittab is an unofficial connector, not affiliated with, endorsed by, or supported by Splitwise, Inc. Source: <a href="https://github.com/dc28vivek/splittab-mcp">github.com/dc28vivek/splittab-mcp</a>. Served from ${origin}.</p>`,
+  );
 }
 
 function grantedScopes(requested: string[]): string[] {
@@ -179,7 +201,12 @@ const defaultHandler: ExportedHandler<Env> = {
     if (url.pathname === '/' || url.pathname === '/health') {
       if (url.pathname === '/health') return Response.json({ ok: true, name: 'splittab-mcp' });
       return html(
-        `<h1>Splittab</h1><p><strong>An unofficial Splitwise MCP server.</strong> Add <code>${url.origin}/mcp</code> as a custom connector in Claude, then sign in with Splitwise. Access is limited to an allowlist.</p><p>Splitting the tab is the easy half. Remembering it, explaining it, and asking for it back is the half that costs you something. This is for that half.</p><p>Not affiliated with, endorsed by, or supported by Splitwise, Inc.</p>`,
+        `<h1>Splittab</h1><p><strong>An unofficial Splitwise MCP server.</strong> Add <code>${url.origin}/mcp</code> as a custom connector in Claude, then sign in with Splitwise.${isOpen(env) ? '' : ' Access is limited to an allowlist.'}</p>
+         <p>Splitting the tab is the easy half. Remembering it, explaining it, and asking for it back is the half that costs you something. This is for that half.</p>
+         <h2 style="font-size:1.05rem;margin-bottom:.3rem">Before you connect</h2>
+         <p>Splitwise access tokens carry no scopes and never expire, so signing in gives this server full access to your Splitwise account. It is stored encrypted, used only for your own requests, and you can revoke it whenever you like under <strong>Settings &gt; Apps</strong> in Splitwise. Nothing here deletes anything, and every write is previewed and confirmed first.</p>
+         <p>If you would rather not hand a token to someone else's server, run it yourself instead: <code>npx -y splittab-mcp</code> with your own API key, and nothing leaves your machine. See <a href="https://github.com/dc28vivek/splittab-mcp">the repository</a>.</p>
+         <p style="color:#666;font-size:.9rem">Not affiliated with, endorsed by, or supported by Splitwise, Inc.</p>`,
       );
     }
 
@@ -211,7 +238,12 @@ const defaultHandler: ExportedHandler<Env> = {
       to.searchParams.set('client_id', env.SPLITWISE_CLIENT_ID);
       to.searchParams.set('redirect_uri', `${url.origin}/callback`);
       to.searchParams.set('state', state);
-      return redirect(to.toString(), bindingCookie(binding, STATE_TTL_SECONDS));
+
+      // The binding cookie rides on this response, so the consent page has to
+      // carry it rather than a bare redirect.
+      const page = consentPage(url.origin, client.clientName ?? authRequest.clientId, to.toString());
+      page.headers.set('set-cookie', bindingCookie(binding, STATE_TTL_SECONDS));
+      return page;
     }
 
     if (url.pathname === '/callback') {
