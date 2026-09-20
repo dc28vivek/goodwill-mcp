@@ -384,23 +384,4 @@
     text_includes: ["do not add up", "Nothing was posted"]
     writes.create_expense: 0
 
-- id: nudge-plain
-  prompt: "Remind Priya to pay, plainly"
-  tool: nudge
-  args: { friend: "Priya", group_id: 100, tone: plain }
-  answer: accept
-  expect:
-    structured.posted: true
-    prompt_includes:
-      - "you owe 61.00 EUR for Lisbon"
-      - "Priya S and 1 other person on that expense will see it"
-      - "Splitwise's private reminder is not available through its API"
-    writes.create_comment: 1
 
-- id: nudge-nobody-owes
-  prompt: "Nudge Alex Brown"
-  tool: nudge
-  args: { friend: "Alex Brown", group_id: 100 }
-  expect:
-    isError: true
-    text_includes: ["does not owe you"]

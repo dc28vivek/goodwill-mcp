@@ -8,7 +8,7 @@ import type { Deps, PendingWrite } from '../server/deps.js';
 import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, sentenceCase, timed, untrusted } from '../server/format.js';
 import { type Invitee, describeResolution, resolveInvitee, resolveMember } from '../server/resolve.js';
 import type { SwAddUserToGroup, SwCreateExpenseByShares, SwCreateGroup, SwExpense, SwUser } from '../splitwise/types.js';
-import { AddExpenseOutput, AddMembersOutput, ConfirmSchema, GroupOutput, ItemSplitOutput, NudgeOutput, ReceiptItemInput, SettleOutputWrite, UpdateExpenseOutput } from './schemas.js';
+import { AddExpenseOutput, AddMembersOutput, ConfirmSchema, GroupOutput, ItemSplitOutput, ReceiptItemInput, SettleOutputWrite, UpdateExpenseOutput } from './schemas.js';
 
 const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } as const;
 
@@ -44,12 +44,6 @@ interface AddPayload {
   currency: string;
   affected: string[];
   preview: string;
-}
-
-interface NudgePayload {
-  expenseId: number;
-  content: string;
-  toName: string;
 }
 
 interface UpdatePayload {
@@ -1016,123 +1010,4 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     }),
   );
 
-  server.registerTool(
-    'nudge',
-    {
-      title: 'Nudge someone to pay',
-      description:
-        "Draft a reminder to someone who owes you, in a tone you choose, and post it after the user confirms. Splitwise's own private Remind button is not in its API, so the only channel available is a comment on your most recent shared expense, which everyone on that expense can see. Say so when offering this: chasing someone in front of the group is a different act from a private nudge, and the user should choose it knowingly. Nothing is posted until confirmed.",
-      inputSchema: z.object({
-        friend: z.string().describe('Member name or id.'),
-        group_id: z.number().int().optional().describe('Limit to a group. Otherwise uses your overall balance with them.'),
-        tone: z.enum(['gentle', 'plain', 'firm']).default('gentle'),
-        message: z.string().max(400).optional().describe('Your own words instead of the drafted message.'),
-      }),
-      outputSchema: NudgeOutput,
-      annotations: WRITE,
-    },
-    timed(deps.metrics, 'nudge', async (args, ctx) => {
-      const denied = missingScope(ctx, 'add');
-      if (denied) return denied;
-      const me = await deps.me();
-      const pending = ctx.mcpReq.requestState<PendingWrite>();
-
-      if (pending && pending.kind === 'nudge') {
-        if (pending.userId !== me.id) return fail('This confirmation belongs to a different Splitwise account. Start again.');
-        const payload = pending.payload as NudgePayload;
-        const answer = acceptedContent(ctx.mcpReq.inputResponses, 'confirm', ConfirmSchema);
-        if (!answer || answer.confirm !== true || declined(ctx.mcpReq.inputResponses)) {
-          deps.metrics.emit({ type: 'preview_declined', tool: 'nudge' });
-          return ok('Cancelled. Nothing was posted.', { posted: false, note: 'Cancelled by the user.' });
-        }
-        deps.metrics.emit({ type: 'preview_confirmed', tool: 'nudge' });
-        const comment = await deps.client.createComment(payload.expenseId, payload.content);
-        deps.metrics.emit({ type: 'write_posted', tool: 'nudge' });
-        return ok(`Posted the reminder to ${payload.toName} as a comment on expense #${payload.expenseId}.`, {
-          posted: true,
-          expense_id: payload.expenseId,
-          comment_id: comment.id,
-          to: payload.toName,
-          note: 'Posted as a comment. Everyone on that expense can see it.',
-        });
-      }
-
-      // Round 1.
-      let target: SwUser;
-      let amountMinor = 0;
-      let currency = me.default_currency ?? 'USD';
-      let expenses: SwExpense[];
-      let context: string;
-
-      if (args.group_id !== undefined) {
-        const group = await deps.group(args.group_id);
-        const r = resolveMember(group, args.friend, me.id);
-        if (!r.ok) return fail(describeResolution(args.friend, r));
-        target = r.user;
-        expenses = await deps.client.allExpenses({ group_id: group.id });
-        const friends = await deps.client.friends();
-        const bal = friends.find((f) => f.id === target.id)?.groups.find((g) => g.group_id === group.id)?.balance ?? [];
-        const first = bal.find((b) => toMinor(b.amount) !== 0) ?? bal[0];
-        if (first) {
-          amountMinor = toMinor(first.amount);
-          currency = first.currency_code;
-        }
-        context = untrusted(group.name, 60);
-      } else {
-        const friends = await deps.client.friends();
-        const r = resolveMember({ members: friends.map((f) => ({ ...f })) }, args.friend, me.id);
-        if (!r.ok) return fail(describeResolution(args.friend, r));
-        target = r.user;
-        const f = friends.find((x) => x.id === target.id)!;
-        const first = f.balance.find((b) => toMinor(b.amount) !== 0) ?? f.balance[0];
-        if (first) {
-          amountMinor = toMinor(first.amount);
-          currency = first.currency_code;
-        }
-        expenses = await deps.client.allExpenses({ friend_id: target.id });
-        context = 'our shared expenses';
-      }
-
-      if (amountMinor <= 0) {
-        return fail(amountMinor === 0 ? `${fullName(target)} does not owe you anything right now.` : `You owe ${fullName(target)}, not the other way round. No nudge sent.`);
-      }
-
-      const shared = expenses
-        .filter((e) => !e.deleted_at && !e.payment && e.users.some((u) => u.user_id === target.id) && e.users.some((u) => u.user_id === me.id))
-        .sort((a, b) => b.date.localeCompare(a.date));
-      const anchor = shared[0];
-      if (!anchor) return fail(`No shared expense with ${fullName(target)} to comment on.`);
-
-      const days = Math.floor((deps.now().getTime() - new Date(anchor.date).getTime()) / 86_400_000);
-      const amount = `${fromMinor(amountMinor)} ${currency}`;
-      const first = untrusted(target.first_name, 40);
-      const drafts: Record<'gentle' | 'plain' | 'firm', string> = {
-        gentle: `Hey ${first}, whenever you get a chance, could you settle the ${amount} for ${context}? No rush. Thanks!`,
-        plain: `Hi ${first}, a reminder: you owe ${amount} for ${context}. Could you settle up this week?`,
-        firm: `${first}, the ${amount} for ${context} has been open for ${days} days. Please settle it by the end of the week.`,
-      };
-      const content = untrusted(args.message ?? drafts[args.tone], 400);
-      const others = anchor.users.filter((u) => u.user_id !== me.id && u.user_id !== target.id).length;
-      const audience =
-        others > 0
-          ? `${fullName(target)} and ${others} other ${others === 1 ? 'person' : 'people'} on that expense will see it`
-          : `only ${fullName(target)} is on that expense, so only they will see it`;
-      const preview = [
-        `Post this as a comment on "${untrusted(anchor.description, 60)}" (${anchor.date.slice(0, 10)}). ${sentenceCase(audience)}.`,
-        others > 0 ? "Splitwise's private reminder is not available through its API, so a public comment is the only way to do this." : '',
-        '',
-        `"${content}"`,
-      ]
-        .filter(Boolean)
-        .join('\n');
-
-      deps.metrics.emit({ type: 'preview_shown', tool: 'nudge' });
-      const payload: NudgePayload = { expenseId: anchor.id, content, toName: fullName(target) };
-      const state = await deps.codec.mint({ kind: 'nudge', userId: me.id, fingerprint: `nudge|${target.id}|${anchor.id}`, payload });
-      return inputRequired({
-        inputRequests: { confirm: inputRequired.elicit({ message: `${preview}\n\nPost it?`, requestedSchema: ConfirmSchema }) },
-        requestState: state,
-      });
-    }),
-  );
 }

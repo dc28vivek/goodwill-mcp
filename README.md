@@ -48,9 +48,8 @@ Your key stays on your machine. Nothing is sent anywhere except Splitwise's own 
 - *"Create a Goa Trip group with Priya and Sam"* — then add expenses to it
 - *"That dinner was actually 90, not 84"* — shows before and after, and what each share becomes
 - *"Priya paid me back, record it"* — closes the balance
-- *"Remind Sam, gently"* — drafts a comment in the tone you pick, then waits
 
-Sixteen tools, three resources, one prompt:
+Fifteen tools, three resources, one prompt:
 
 | Tool | What it does | Writes? |
 |---|---|---|
@@ -69,7 +68,6 @@ Sixteen tools, three resources, one prompt:
 | `update_expense` | Corrects an amount, description, date or category, rescaling shares | after confirmation |
 | `split_by_items` | A receipt split line by line, tax and tip allocated proportionally | after confirmation |
 | `settle_up` | Records a payment that already happened, closing the balance | after confirmation |
-| `nudge` | A drafted reminder, posted as a comment | after confirmation |
 
 `find_missing_expenses` and `find_duplicates` are two halves of the same job: making the ledger match reality. One finds what's missing from Splitwise, the other finds what's in there twice.
 

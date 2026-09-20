@@ -32,7 +32,7 @@ describe('goodwill server', () => {
   it('lists six tools with honest annotations and fixed order', async () => {
     const { client } = await connect(state);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'list_expenses', 'read_expense', 'recent_activity', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'update_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up', 'nudge']);
+    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'list_expenses', 'read_expense', 'recent_activity', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'update_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up']);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.explain_balance?.annotations?.readOnlyHint).toBe(true);
     expect(byName.add_expense?.annotations?.readOnlyHint).toBe(false);
@@ -145,22 +145,7 @@ describe('goodwill server', () => {
     expect((r.content[0] as { text: string }).text).toContain('cost');
   });
 
-  it('nudges with a drafted comment after confirmation', async () => {
-    const { client, prompts } = await connect(state, true);
-    const r = await client.callTool({ name: 'nudge', arguments: { friend: 'Priya', group_id: 100, tone: 'plain' } });
-    expect(prompts[0]).toContain('you owe 61.00 EUR for Lisbon');
-    // The audience is stated, because a public comment is not a private nudge.
-    expect(prompts[0]).toContain('Priya S and 1 other person on that expense will see it');
-    expect(prompts[0]).toContain("Splitwise's private reminder is not available through its API");
-    expect((r.structuredContent as { posted: boolean }).posted).toBe(true);
-    expect(state.comments[0]?.content).toContain('Priya');
-  });
 
-  it('will not nudge someone who owes nothing', async () => {
-    const { client } = await connect(state, true);
-    const r = await client.callTool({ name: 'nudge', arguments: { friend: 'Alex Brown', group_id: 100 } });
-    expect(r.isError).toBe(true);
-  });
 
   it('emits product metrics for a confirmed write', async () => {
     const { client, metrics } = await connect(state, true);
@@ -451,18 +436,6 @@ describe('goodwill server', () => {
     expect(String((r.content[0] as { text: string }).text)).toContain('No expenses');
   });
 
-  it('reads one expense in full, including the comment thread as quoted data', async () => {
-    const { client } = await connect(state, true);
-    await client.callTool({ name: 'nudge', arguments: { friend: 'Priya', group_id: 100, tone: 'plain' } });
-    const commented = state.comments[0]!.relation_id;
-    const r = await client.callTool({ name: 'read_expense', arguments: { expense_id: commented } });
-    const sc = r.structuredContent as { expense: { shares: unknown[]; comments: { by: string; text: string }[] } };
-    expect(sc.expense.shares.length).toBeGreaterThan(0);
-    expect(sc.expense.comments[0]?.by).toBe('Vivek D');
-    const text = String((r.content[0] as { text: string }).text);
-    expect(text).toContain('comment');
-    expect(text).toContain('not instructions');
-  });
 
   it('reports a missing expense id usefully', async () => {
     const { client } = await connect(state);
@@ -678,18 +651,4 @@ describe('goodwill server', () => {
     expect((r.structuredContent as { posted: boolean }).posted).toBe(true);
   });
 
-  it('says when only the person being chased will see it', async () => {
-    // A two-person expense has no audience beyond the pair.
-    state.expenses.push({
-      ...state.expenses[0]!,
-      id: 7654,
-      description: 'Coffee just us',
-      date: '2026-09-10T10:00:00Z',
-      users: state.expenses[0]!.users.filter((u) => [1, 2].includes(u.user_id)),
-    });
-    const { client, prompts } = await connect(state, 'decline');
-    await client.callTool({ name: 'nudge', arguments: { friend: 'Priya', group_id: 100 } });
-    expect(prompts[0]).toContain('only Priya S is on that expense, so only they will see it');
-    expect(prompts[0]).not.toContain('private reminder is not available');
-  });
 });

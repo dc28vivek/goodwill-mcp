@@ -88,13 +88,6 @@ export const AddExpenseOutput = z.object({
   note: z.string(),
 });
 
-export const NudgeOutput = z.object({
-  posted: z.boolean(),
-  expense_id: z.number().optional(),
-  comment_id: z.number().optional(),
-  to: z.string().optional(),
-  note: z.string(),
-});
 
 export const ConfirmSchema = z.object({
   confirm: z.boolean().describe('true to go ahead, false to cancel'),
