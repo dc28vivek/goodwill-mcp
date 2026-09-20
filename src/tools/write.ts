@@ -5,7 +5,7 @@ import { ReceiptMismatch, splitByItems } from '../domain/items.js';
 import { fromMinor, rescaleShares, splitEqual, toMinor } from '../domain/money.js';
 import { parseExpenseSentence } from '../domain/parser.js';
 import type { Deps, PendingWrite } from '../server/deps.js';
-import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, timed, untrusted } from '../server/format.js';
+import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, sentenceCase, timed, untrusted } from '../server/format.js';
 import { type Invitee, describeResolution, resolveInvitee, resolveMember } from '../server/resolve.js';
 import type { SwAddUserToGroup, SwCreateExpenseByShares, SwCreateGroup, SwExpense, SwUser } from '../splitwise/types.js';
 import { AddExpenseOutput, AddMembersOutput, ConfirmSchema, GroupOutput, ItemSplitOutput, NudgeOutput, ReceiptItemInput, SettleOutputWrite, UpdateExpenseOutput } from './schemas.js';
@@ -1021,7 +1021,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
     {
       title: 'Nudge someone to pay',
       description:
-        'Draft a reminder to someone who owes you, in a tone you choose, and post it as a comment on your most recent shared expense after the user confirms. The comment is visible to everyone on that expense. Nothing is posted until confirmed.',
+        "Draft a reminder to someone who owes you, in a tone you choose, and post it after the user confirms. Splitwise's own private Remind button is not in its API, so the only channel available is a comment on your most recent shared expense, which everyone on that expense can see. Say so when offering this: chasing someone in front of the group is a different act from a private nudge, and the user should choose it knowingly. Nothing is posted until confirmed.",
       inputSchema: z.object({
         friend: z.string().describe('Member name or id.'),
         group_id: z.number().int().optional().describe('Limit to a group. Otherwise uses your overall balance with them.'),
@@ -1112,7 +1112,19 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         firm: `${first}, the ${amount} for ${context} has been open for ${days} days. Please settle it by the end of the week.`,
       };
       const content = untrusted(args.message ?? drafts[args.tone], 400);
-      const preview = `Post this comment on "${untrusted(anchor.description, 60)}" (${anchor.date.slice(0, 10)}), where ${fullName(target)} and everyone else on that expense will see it:\n\n"${content}"`;
+      const others = anchor.users.filter((u) => u.user_id !== me.id && u.user_id !== target.id).length;
+      const audience =
+        others > 0
+          ? `${fullName(target)} and ${others} other ${others === 1 ? 'person' : 'people'} on that expense will see it`
+          : `only ${fullName(target)} is on that expense, so only they will see it`;
+      const preview = [
+        `Post this as a comment on "${untrusted(anchor.description, 60)}" (${anchor.date.slice(0, 10)}). ${sentenceCase(audience)}.`,
+        others > 0 ? "Splitwise's private reminder is not available through its API, so a public comment is the only way to do this." : '',
+        '',
+        `"${content}"`,
+      ]
+        .filter(Boolean)
+        .join('\n');
 
       deps.metrics.emit({ type: 'preview_shown', tool: 'nudge' });
       const payload: NudgePayload = { expenseId: anchor.id, content, toName: fullName(target) };

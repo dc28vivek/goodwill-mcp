@@ -391,7 +391,10 @@
   answer: accept
   expect:
     structured.posted: true
-    prompt_includes: ["you owe 61.00 EUR for Lisbon"]
+    prompt_includes:
+      - "you owe 61.00 EUR for Lisbon"
+      - "Priya S and 1 other person on that expense will see it"
+      - "Splitwise's private reminder is not available through its API"
     writes.create_comment: 1
 
 - id: nudge-nobody-owes

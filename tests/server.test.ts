@@ -149,6 +149,9 @@ describe('goodwill server', () => {
     const { client, prompts } = await connect(state, true);
     const r = await client.callTool({ name: 'nudge', arguments: { friend: 'Priya', group_id: 100, tone: 'plain' } });
     expect(prompts[0]).toContain('you owe 61.00 EUR for Lisbon');
+    // The audience is stated, because a public comment is not a private nudge.
+    expect(prompts[0]).toContain('Priya S and 1 other person on that expense will see it');
+    expect(prompts[0]).toContain("Splitwise's private reminder is not available through its API");
     expect((r.structuredContent as { posted: boolean }).posted).toBe(true);
     expect(state.comments[0]?.content).toContain('Priya');
   });
@@ -673,5 +676,20 @@ describe('goodwill server', () => {
     });
     const r = await client.callTool({ name: 'add_expense', arguments: { group_id: 100, text: 'tea 5' } });
     expect((r.structuredContent as { posted: boolean }).posted).toBe(true);
+  });
+
+  it('says when only the person being chased will see it', async () => {
+    // A two-person expense has no audience beyond the pair.
+    state.expenses.push({
+      ...state.expenses[0]!,
+      id: 7654,
+      description: 'Coffee just us',
+      date: '2026-09-10T10:00:00Z',
+      users: state.expenses[0]!.users.filter((u) => [1, 2].includes(u.user_id)),
+    });
+    const { client, prompts } = await connect(state, 'decline');
+    await client.callTool({ name: 'nudge', arguments: { friend: 'Priya', group_id: 100 } });
+    expect(prompts[0]).toContain('only Priya S is on that expense, so only they will see it');
+    expect(prompts[0]).not.toContain('private reminder is not available');
   });
 });
