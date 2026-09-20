@@ -108,3 +108,74 @@ export const KIND_LABELS: Record<ActivityKind, string> = {
   friend_currency_changed: 'currency changed',
   other: 'other',
 };
+
+export interface CollapsedActivity extends Activity {
+  /** Set when this expense was added and then removed inside the window. */
+  transient?: { addedAt: string; removedAt: string; hours: number; absorbed: number };
+}
+
+const ADDED = new Set<ActivityKind>(['expense_added', 'expense_undeleted']);
+
+/**
+ * Fold "added it, then deleted it" into a single event.
+ *
+ * Adding an expense and removing it again is one mistake, not two events. The
+ * balance ends where it started, so listing both makes a correction look like
+ * activity. It is not dropped, though: other people may have seen the expense
+ * while it existed, and silently hiding something the user did is worse than
+ * showing it once with the right shape.
+ *
+ * Only folds when the add is inside the window too. A deletion of something
+ * created earlier is a real change to a real balance and stays on its own.
+ */
+export function collapseTransient(activities: Activity[]): CollapsedActivity[] {
+  const byExpense = new Map<number, Activity[]>();
+  for (const a of activities) {
+    if (a.sourceType !== 'Expense' || a.sourceId === null) continue;
+    byExpense.set(a.sourceId, [...(byExpense.get(a.sourceId) ?? []), a]);
+  }
+
+  const folded = new Map<number, CollapsedActivity>();
+  const drop = new Set<number>();
+  for (const [, group] of byExpense) {
+    const ordered = [...group].sort((a, b) => a.at.localeCompare(b.at));
+    const last = ordered[ordered.length - 1]!;
+    if (last.kind !== 'expense_deleted') continue;
+    const added = ordered.find((a) => ADDED.has(a.kind));
+    if (!added) continue;
+    const ms = new Date(last.at).getTime() - new Date(added.at).getTime();
+    folded.set(added.id, {
+      ...added,
+      transient: {
+        addedAt: added.at,
+        removedAt: last.at,
+        hours: Math.max(0, Math.round(ms / 3_600_000)),
+        absorbed: ordered.length,
+      },
+    });
+    for (const a of ordered) if (a.id !== added.id) drop.add(a.id);
+  }
+
+  return activities.filter((a) => !drop.has(a.id)).map((a) => folded.get(a.id) ?? a);
+}
+
+/**
+ * Splitwise records what an edit changed as a System comment on the expense
+ * ("John D. updated this transaction: - The cost changed from $6.99 to
+ * $8.99"), not in the notification. Pull the change description out of one.
+ *
+ * The leading attribution is dropped because the event line already says who
+ * did it, and the bullet markers are flattened so several changes read as one
+ * clause.
+ */
+export function changeSummary(systemComment: string): string | null {
+  const text = toPlainText(systemComment);
+  const after = text.replace(/^.*?updated this transaction:\s*/i, '');
+  if (after === text && !/changed|added|removed/i.test(after)) return null;
+  const parts = after
+    .split(/\s*-\s+/)
+    .map((p) => p.trim().replace(/\.$/, ''))
+    .filter(Boolean);
+  if (parts.length === 0) return null;
+  return parts.join('; ');
+}

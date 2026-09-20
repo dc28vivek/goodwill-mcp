@@ -528,12 +528,34 @@ describe('goodwill server', () => {
     const sc = r.structuredContent as { returned: number; events: { what: string; group: string | null }[] };
     // Two expense events touch this user. A stranger's group change and an
     // unknown event by someone else are left out.
-    expect(sc.returned).toBe(2);
-    expect(sc.events[0]?.what).toBe('Priya S. added Dinner at Cervejaria. You owe 28.00 EUR');
+    expect(sc.returned).toBe(4);
+    expect(sc.events.some((e) => e.what === 'Priya S. added Dinner at Cervejaria. You owe 28.00 EUR')).toBe(true);
     expect(sc.events[0]?.group).toBe('Lisbon');
     const text = String((r.content[0] as { text: string }).text);
     expect(text).toContain('Lisbon:');
     expect(text).not.toContain('<strong>');
+  });
+
+  it('folds an add and delete of the same expense into one line', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'recent_activity', arguments: { since: '2026-09-14' } });
+    const sc = r.structuredContent as { events: { what: string; transient: { hours: number } | null }[] };
+    const taxi = sc.events.find((e) => e.what.includes('Taxi from airport'));
+    expect(taxi?.transient).toMatchObject({ hours: 3 });
+    expect(taxi?.what).toContain('removed it 3 hours later, so nothing changed');
+    // One line, not an add and a delete.
+    expect(sc.events.filter((e) => e.what.includes('Taxi from airport'))).toHaveLength(1);
+  });
+
+  it('says what an edit actually changed', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'recent_activity', arguments: { since: '2026-09-14' } });
+    const sc = r.structuredContent as { events: { what: string }[] };
+    const edit = sc.events.find((e) => e.what.includes('updated'));
+    expect(edit?.what).toContain('The cost changed from $89.00 to $99.00');
+    // The add of the same expense is not an edit and must not carry the summary.
+    const added = sc.events.find((e) => e.what.includes('added Dinner'));
+    expect(added?.what).not.toContain('cost changed');
   });
 
   it('says how many events it left out rather than hiding them silently', async () => {
@@ -546,7 +568,8 @@ describe('goodwill server', () => {
     const { client } = await connect(state);
     const r = await client.callTool({ name: 'recent_activity', arguments: { since: '2026-09-14', everything: true } });
     const sc = r.structuredContent as { returned: number; events: { what: string; group: string | null; group_id: number | null }[] };
-    expect(sc.returned).toBe(4);
+    // Four that involve this user, plus a stranger's group change and an event of an unknown type.
+    expect(sc.returned).toBe(6);
     const membership = sc.events.find((e) => e.what.includes('removed'));
     // A group event names its own group, so it is placed without an expense.
     expect(membership).toMatchObject({ group: 'Lisbon', group_id: 100 });
@@ -556,14 +579,14 @@ describe('goodwill server', () => {
   it('honours the since date', async () => {
     const { client } = await connect(state);
     const r = await client.callTool({ name: 'recent_activity', arguments: { since: '2026-09-16' } });
-    expect((r.structuredContent as { returned: number }).returned).toBe(2);
+    expect((r.structuredContent as { returned: number }).returned).toBe(4);
   });
 
   it('can narrow to one group', async () => {
     const { client } = await connect(state);
     const r = await client.callTool({ name: 'recent_activity', arguments: { since: '2026-09-14', group_id: 100 } });
     const sc = r.structuredContent as { returned: number; events: { group_id: number | null }[] };
-    expect(sc.returned).toBe(2);
+    expect(sc.returned).toBe(4);
     for (const e of sc.events) expect(e.group_id).toBe(100);
   });
 

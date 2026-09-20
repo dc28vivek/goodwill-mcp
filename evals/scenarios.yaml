@@ -14,8 +14,13 @@
   args: { since: "2026-09-14" }
   expect:
     isError: false
-    structured.returned: 2
-    text_includes: ["Lisbon:", "Priya S. added Dinner at Cervejaria", "did not involve you"]
+    structured.returned: 4
+    text_includes:
+      - "Lisbon:"
+      - "Priya S. added Dinner at Cervejaria"
+      - "The cost changed from $89.00 to $99.00"
+      - "removed it 3 hours later, so nothing changed"
+      - "did not involve you"
 
 - id: activity-injection-in-content
   # A notification embeds an expense description written by someone else. It is

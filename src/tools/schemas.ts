@@ -231,6 +231,10 @@ export const ActivityOutput = z.object({
       group: z.string().nullable(),
       group_id: z.number().nullable(),
       expense_id: z.number().nullable(),
+      transient: z
+        .object({ addedAt: z.string(), removedAt: z.string(), hours: z.number(), absorbed: z.number() })
+        .nullable()
+        .describe('Set when the expense was added and removed again inside the window, so the balance never moved.'),
     }),
   ),
 });

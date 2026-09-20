@@ -2,7 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { type Transaction, findDuplicateClusters, findMissingExpenses, payerOf, toExpenseLike } from '../domain/dedupe.js';
 import type { SwExpense } from '../splitwise/types.js';
-import { KIND_LABELS, toActivity } from '../domain/activity.js';
+import { KIND_LABELS, changeSummary, collapseTransient, toActivity } from '../domain/activity.js';
 import { type SinceMode, explainBalance } from '../domain/explain.js';
 import { fromMinor, toMinor } from '../domain/money.js';
 import { overallPosition } from '../domain/position.js';
@@ -364,8 +364,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
           .map((e) => e.id),
       );
 
-      const events = notifications
-        .map(toActivity)
+      const events = collapseTransient(notifications.map(toActivity))
         .map((a) => {
           // An event points at either an expense or a group. Expense events
           // need the id-to-group map; group events (someone joining, settings
@@ -385,6 +384,8 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
             group_id: gid !== null && gid !== 0 ? gid : null,
             expense_id: a.sourceType === 'Expense' ? a.sourceId : null,
             by_me: a.byUserId === me.id,
+            transient: a.transient ?? null,
+            needs_detail: a.kind === 'expense_updated' && a.sourceId !== null,
           };
         })
         .filter((e) => e.at >= from)
@@ -401,6 +402,40 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         return ok(`Nothing involving you has happened since ${from}${group_id !== undefined ? ' in that group' : ''}.${note}`, { since: from, returned: 0, more_available: false, events: [] });
       }
 
+      // "You updated X" does not say what changed. Splitwise records that as a
+      // System comment on the expense, so an edit needs a second lookup. Bounded
+      // and done in parallel, because a busy week should not become forty calls.
+      const DETAIL_BUDGET = 8;
+      const toDetail = shown.filter((e) => e.needs_detail).slice(0, DETAIL_BUDGET);
+      const details = new Map<number, string>();
+      await Promise.all(
+        toDetail.map(async (e) => {
+          try {
+            const full = await deps.client.expense(e.expense_id!);
+            const near = (full.comments ?? [])
+              .filter((c) => c.comment_type === 'System' && !c.deleted_at)
+              .filter((c) => Math.abs(new Date(c.created_at).getTime() - new Date(e.at).getTime()) < 2 * 86_400_000)
+              .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+            const summary = near ? changeSummary(near.content) : null;
+            if (summary) details.set(e.expense_id!, untrusted(summary, 160));
+          } catch {
+            // An expense that cannot be read just keeps the plain line.
+          }
+        }),
+      );
+      for (const e of shown) {
+        // Only the edit event gets the change summary. An "added" event for the
+        // same expense is not an edit, and appending it there says a change
+        // happened that did not.
+        const detail = e.needs_detail && e.expense_id !== null ? details.get(e.expense_id) : undefined;
+        if (detail) e.what = `${e.what} (${detail})`;
+        if (e.transient) {
+          const h = e.transient.hours;
+          const how = h === 0 ? 'and removed it again straight away' : h < 24 ? `and removed it ${h} hour${h === 1 ? '' : 's'} later` : `and removed it ${Math.round(h / 24)} day${Math.round(h / 24) === 1 ? '' : 's'} later`;
+          e.what = `${e.what.replace(/^You added /, 'You added ')} — ${how}, so nothing changed`;
+        }
+      }
+
       // Group the lines by group so a week reads as a digest rather than a list.
       const buckets = new Map<string, typeof shown>();
       for (const e of shown) {
@@ -413,7 +448,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         ...(!everything && hidden > 0 ? ['', `${hidden} other ${hidden === 1 ? 'event' : 'events'} did not involve you and are not listed.`] : []),
       ].join('\n');
 
-      const structured = shown.map(({ by_me: _b, ...rest }) => rest);
+      const structured = shown.map(({ by_me: _b, needs_detail: _n, ...rest }) => rest);
       return ok(text, { since: from, returned: shown.length, more_available: kept.length > shown.length, events: structured });
     }),
   );

@@ -71,6 +71,7 @@ export const LISBON_EXPENSES: SwExpense[] = [
     description: 'Taxi from airport',
     cost: '16.00',
     date: '2026-09-04T09:00:00Z',
+    updated_at: '2026-09-16T14:00:00Z',
     category: { id: 31, name: 'Taxi' },
     users: [share(ME, '16.00', '8.00'), share(SAM, '0', '8.00')],
   }),

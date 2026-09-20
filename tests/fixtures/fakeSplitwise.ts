@@ -11,6 +11,8 @@ export interface FakeState {
   friends: SwFriend[];
   expenses: SwExpense[];
   comments: SwComment[];
+  /** Splitwise's own audit trail of edits, separate from what people write. */
+  systemComments: SwComment[];
   notifications: SwNotification[];
   writes: { path: string; body: unknown }[];
   nextId: number;
@@ -34,12 +36,27 @@ export function makeState(): FakeState {
     friends,
     expenses: LISBON_EXPENSES.map((e) => ({ ...e })),
     comments: [],
+    systemComments: [
+      {
+        id: 900,
+        content: 'Vivek D. updated this transaction: - The cost changed from $89.00 to $99.00',
+        comment_type: 'System',
+        relation_type: 'ExpenseComment',
+        relation_id: 1002,
+        created_at: '2026-09-17T09:00:00Z',
+        deleted_at: null,
+        user: null,
+      },
+    ],
     notifications: [
       { id: 1, type: 0, created_at: '2026-09-17T09:00:00Z', created_by: 2, source: { type: 'Expense', id: 1001, url: null }, content: '<strong>Priya S.</strong> added <strong>Dinner at Cervejaria</strong>.<br><font color="#5bc5a7">You owe 28.00 EUR</font>' },
       { id: 2, type: 3, created_at: '2026-09-16T09:00:00Z', created_by: 3, source: { type: 'Expense', id: 1002, url: null }, content: '<strong>Sam K.</strong> commented on <strong>Airbnb</strong>' },
       { id: 3, type: 99, created_at: '2026-09-15T09:00:00Z', created_by: 2, source: null, content: 'A brand new kind of event' },
       { id: 5, type: 5, created_at: '2026-09-15T10:00:00Z', created_by: 3, source: { type: 'Group', id: 100, url: null }, content: '<strong>Sam K.</strong> removed <strong>VV</strong> from the group <strong>Lisbon</strong>.' },
       { id: 4, type: 0, created_at: '2026-08-01T09:00:00Z', created_by: 2, source: { type: 'Expense', id: 1003, url: null }, content: 'Something older' },
+      { id: 6, type: 0, created_at: '2026-09-16T11:00:00Z', created_by: 1, source: { type: 'Expense', id: 1003, url: null }, content: '<strong>You</strong> added <strong>Taxi from airport</strong>' },
+      { id: 7, type: 2, created_at: '2026-09-16T14:00:00Z', created_by: 1, source: { type: 'Expense', id: 1003, url: null }, content: '<strong>You</strong> deleted <strong>Taxi from airport</strong>' },
+      { id: 8, type: 1, created_at: '2026-09-17T09:00:00Z', created_by: 1, source: { type: 'Expense', id: 1002, url: null }, content: '<strong>You</strong> updated <strong>Airbnb</strong>' },
     ],
     writes: [],
     nextId: 5000,
@@ -88,8 +105,9 @@ export function fakeFetch(state: FakeState): typeof fetch {
       const id = Number(path.split('/').pop());
       const found = state.expenses.find((e) => e.id === id);
       if (!found) return json({ errors: { base: ['Invalid API Request: record not found'] } }, 404);
-      const comments = state.comments.filter((c) => c.relation_id === id);
-      return json({ expense: { ...found, comments, comments_count: comments.length } });
+      const userComments = state.comments.filter((c) => c.relation_id === id);
+      const comments = [...userComments, ...state.systemComments.filter((c) => c.relation_id === id)];
+      return json({ expense: { ...found, comments, comments_count: userComments.length } });
     }
     if (path === '/create_expense') {
       state.writes.push({ path, body });
