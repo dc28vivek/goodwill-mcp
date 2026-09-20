@@ -1,4 +1,9 @@
 import type { CallToolResult } from '@modelcontextprotocol/server';
+import { withSpan } from '../obs/context.js';
+import { SPAN_KIND, type Tracer } from '../obs/trace.js';
+import { OverBudget } from '../store/budget.js';
+import { UpstreamDown } from '../splitwise/breaker.js';
+import { SplitwiseUnauthorized } from '../splitwise/client.js';
 
 /**
  * Text written by other group members (descriptions, comments, names) is
@@ -55,26 +60,54 @@ export function missingScope(ctx: { http?: { authInfo?: { scopes: string[] } } |
 
 
 /**
+ * Turn the three operational failures into a plain answer instead of a stack
+ * trace. Each one is a true statement about what to do next, and each carries
+ * the trace id, which is the only handle a person has when reporting a fault.
+ */
+function explain(err: unknown, traceId: string): CallToolResult | undefined {
+  const reference = `\n\nReference: ${traceId}`;
+  if (err instanceof SplitwiseUnauthorized) {
+    return fail(`Splitwise rejected this connection, which usually means access was revoked in Splitwise under Settings > Apps. Sign in again to reconnect.${reference}`);
+  }
+  if (err instanceof UpstreamDown) {
+    return fail(`Splitwise is not responding. This connector stopped retrying so it does not add to the load. Try again in about ${Math.ceil(err.retryAfterMs / 1000)} seconds.${reference}`);
+  }
+  if (err instanceof OverBudget) {
+    return fail(`This account has made a lot of Splitwise requests in a short time, so the connector paused itself. Try again in about ${Math.ceil(err.retryAfterMs / 1000)} seconds.${reference}`);
+  }
+  return undefined;
+}
+
+/**
  * Wrap a tool handler so every call emits one `tool_call` event with duration
- * and whether it produced an error result. Round 2 is a retry that carries
- * input responses.
+ * and whether it produced an error result, and opens one span that every
+ * upstream request hangs off. Round 2 is a retry that carries input responses.
  */
 export function timed<A, C extends { mcpReq: { inputResponses?: Record<string, unknown> | undefined } }, R extends { isError?: boolean | undefined } | { resultType?: string }>(
-  metrics: { emit(e: { type: 'tool_call'; tool: string; ok: boolean; ms: number; round: 1 | 2 }): void },
+  deps: { metrics: { emit(e: { type: 'tool_call'; tool: string; ok: boolean; ms: number; round: 1 | 2 }): void }; tracer: Tracer },
   tool: string,
   fn: (args: A, ctx: C) => Promise<R>,
 ): (args: A, ctx: C) => Promise<R> {
   return async (args, ctx) => {
     const started = Date.now();
     const round: 1 | 2 = ctx.mcpReq.inputResponses ? 2 : 1;
+    const span = deps.tracer.startSpan(`tool ${tool}`, SPAN_KIND.server, { 'mcp.tool': tool, 'mcp.round': round });
     try {
-      const result = await fn(args, ctx);
+      const result = await withSpan(span, () => fn(args, ctx));
       const isError = 'isError' in result && result.isError === true;
-      metrics.emit({ type: 'tool_call', tool, ok: !isError, ms: Date.now() - started, round });
+      span.setAttributes({ 'mcp.outcome': isError ? 'error' : 'ok' });
+      deps.metrics.emit({ type: 'tool_call', tool, ok: !isError, ms: Date.now() - started, round });
       return result;
     } catch (err) {
-      metrics.emit({ type: 'tool_call', tool, ok: false, ms: Date.now() - started, round });
+      span.recordError(err);
+      deps.metrics.emit({ type: 'tool_call', tool, ok: false, ms: Date.now() - started, round });
+      const friendly = explain(err, span.traceId);
+      // A tool result, not a protocol error, so the model can relay the advice.
+      if (friendly) return friendly as unknown as R;
       throw err;
+    } finally {
+      span.end();
+      void deps.tracer.flush();
     }
   };
 }

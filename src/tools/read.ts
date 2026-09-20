@@ -86,7 +86,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: ExplainOutput,
       annotations: READ,
     },
-    timed(deps.metrics, 'explain_balance', async ({ group_id, friend, since }, ctx) => {
+    timed(deps, 'explain_balance', async ({ group_id, friend, since }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const me = await deps.me();
@@ -238,7 +238,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: ListExpensesOutput,
       annotations: READ,
     },
-    timed(deps.metrics, 'list_expenses', async ({ group_id, friend, since, until, contains, include_payments, limit }, ctx) => {
+    timed(deps, 'list_expenses', async ({ group_id, friend, since, until, contains, include_payments, limit }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const me = await deps.me();
@@ -303,7 +303,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: ReadExpenseOutput,
       annotations: READ,
     },
-    timed(deps.metrics, 'read_expense', async ({ expense_id }, ctx) => {
+    timed(deps, 'read_expense', async ({ expense_id }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const me = await deps.me();
@@ -360,7 +360,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: ActivityOutput,
       annotations: READ,
     },
-    timed(deps.metrics, 'recent_activity', async ({ since, group_id, everything, limit }, ctx) => {
+    timed(deps, 'recent_activity', async ({ since, group_id, everything, limit }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const now = deps.now();
@@ -486,7 +486,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: OverallOutput,
       annotations: READ,
     },
-    timed(deps.metrics, 'overall_balances', async (_args, ctx) => {
+    timed(deps, 'overall_balances', async (_args, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const [me, friends] = await Promise.all([deps.me(), deps.client.friends()]);
@@ -526,7 +526,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: MissingOutput,
       annotations: READ,
     },
-    timed(deps.metrics, 'find_missing_expenses', async ({ transactions, currency, group_id, window_days }, ctx) => {
+    timed(deps, 'find_missing_expenses', async ({ transactions, currency, group_id, window_days }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const me = await deps.me();
@@ -580,7 +580,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: StaleOutput,
       annotations: READ,
     },
-    timed(deps.metrics, 'stale_balances', async ({ older_than_days, group_id }, ctx) => {
+    timed(deps, 'stale_balances', async ({ older_than_days, group_id }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const me = await deps.me();
@@ -628,7 +628,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: SettleOutput,
       annotations: READ,
     },
-    timed(deps.metrics, 'settle_plan', async ({ group_id, everything }, ctx) => {
+    timed(deps, 'settle_plan', async ({ group_id, everything }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const [me, group] = await Promise.all([deps.me(), deps.group(group_id)]);
@@ -708,7 +708,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       outputSchema: ReconcileOutput,
       annotations: READ,
     },
-    timed(deps.metrics, 'find_duplicates', async ({ group_id, since_days, threshold }, ctx) => {
+    timed(deps, 'find_duplicates', async ({ group_id, since_days, threshold }, ctx) => {
       const denied = missingScope(ctx, 'read');
       if (denied) return denied;
       const since = new Date(deps.now().getTime() - since_days * 86_400_000).toISOString();

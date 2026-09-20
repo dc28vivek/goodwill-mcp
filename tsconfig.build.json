@@ -9,5 +9,5 @@
     "removeComments": false
   },
   "include": ["src/**/*.ts"],
-  "exclude": ["src/worker.ts", "src/bin/http.ts", "node_modules", "dist"]
+  "exclude": ["src/worker.ts", "src/worker/**/*.ts", "src/bin/http.ts", "node_modules", "dist"]
 }

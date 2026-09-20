@@ -83,7 +83,7 @@ Every expense you add changes what other people owe. So:
 - **Every change signs itself.** An expense this connector adds or corrects gets a comment saying what happened and that Goodwill MCP did it, visible to everyone on the expense. Splitwise attributes expenses to the app that made them, but that is easy to miss; a comment is not.
 - **No deletes.** There is no tool that removes an expense, a group, or a member. If a duplicate should go, you remove it in the Splitwise app.
 - **Corrections show what they overwrite.** `update_expense` is the only tool that changes something people have already seen, so its preview puts the current values next to the new ones and spells out what each person's share becomes. On the hosted server it needs a `modify` scope that is not granted by default.
-- **No double posts.** A write log keyed by group, amount, day, payer and normalised description refuses to post the same expense twice within 48 hours, across retries and across devices.
+- **No double posts.** A write log keyed by group, amount, day, payer and normalised description refuses to post the same expense twice within 48 hours, across retries and across devices. The fingerprint is reserved before the upstream call, not merely looked up, so two requests racing each other cannot both win.
 - **Text from your group is data, not instructions.** Descriptions and comments are written by other members and could contain anything. The server labels them as data and no tool can redirect where a request goes.
 
 ## Other ways to run it
@@ -97,7 +97,7 @@ SPLITWISE_API_KEY=your-key npm run dev:http     # http://127.0.0.1:3000/mcp
 **Hosted, multi-user** as a Cloudflare Worker with a full OAuth 2.1 authorization server, so each person signs in with their own Splitwise account instead of pasting a key:
 
 1. In your Splitwise app settings, set the callback URL to `https://<your-worker-host>/callback`.
-2. `npx wrangler kv namespace create OAUTH_KV` and `npx wrangler kv namespace create GOODWILL_KV`; paste the ids into `wrangler.jsonc`.
+2. `npx wrangler kv namespace create OAUTH_KV`; paste the id into `wrangler.jsonc`.
 3. Secrets: `npx wrangler secret put SPLITWISE_CLIENT_ID`, `SPLITWISE_CLIENT_SECRET`, `GOODWILL_STATE_KEY` (32+ random characters).
 4. Set `ALLOWED_EMAILS` in `wrangler.jsonc`. Empty means nobody.
 5. `npm run deploy`, then add `https://<your-worker-host>/mcp` as a custom connector. Operating notes are in [RUNBOOK.md](RUNBOOK.md).

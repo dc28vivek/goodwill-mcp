@@ -1,6 +1,7 @@
 import type { RequestStateCodec } from '@modelcontextprotocol/server';
 import type { SplitwiseClient } from '../splitwise/client.js';
 import type { SwCurrentUser, SwGroup } from '../splitwise/types.js';
+import type { Tracer } from '../obs/trace.js';
 import type { WriteLog } from '../store/writeLog.js';
 import type { Metrics } from './metrics.js';
 
@@ -21,6 +22,8 @@ export interface Deps {
   codec: RequestStateCodec<PendingWrite>;
   now: () => Date;
   metrics: Metrics;
+  /** One trace per tool call. Its id is the reference a user can quote. */
+  tracer: Tracer;
   /** Memoized per request. */
   me(): Promise<SwCurrentUser>;
   group(id: number): Promise<SwGroup>;

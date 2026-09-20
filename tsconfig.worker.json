@@ -1,9 +1,9 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "types": ["@cloudflare/workers-types/experimental"],
+    "types": ["@cloudflare/workers-types/experimental", "node"],
     "lib": ["ES2023"],
     "noEmit": true
   },
-  "include": ["src/worker.ts", "src/server/**/*.ts", "src/tools/**/*.ts", "src/domain/**/*.ts", "src/splitwise/**/*.ts", "src/store/**/*.ts"]
+  "include": ["src/worker.ts", "src/worker/**/*.ts", "src/obs/**/*.ts", "src/server/**/*.ts", "src/tools/**/*.ts", "src/domain/**/*.ts", "src/splitwise/**/*.ts", "src/store/**/*.ts"]
 }

@@ -5,16 +5,31 @@
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "kv_namespaces": [
-    { "binding": "OAUTH_KV", "id": "REPLACE_WITH_OAUTH_KV_ID" },
-    { "binding": "GOODWILL_KV", "id": "REPLACE_WITH_GOODWILL_KV_ID" }
+    { "binding": "OAUTH_KV", "id": "REPLACE_WITH_OAUTH_KV_ID" }
+  ],
+  // One object per Splitwise user. Holds the write-log reservation and the
+  // upstream budget, the two pieces of state that must be strongly consistent.
+  // KV cannot do this: it has no read-after-write guarantee, so two colos can
+  // both read an unclaimed fingerprint and both post the same expense.
+  "durable_objects": {
+    "bindings": [{ "name": "USER_STATE", "class_name": "UserState" }]
+  },
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["UserState"] }
   ],
   "vars": {
     "ALLOWED_EMAILS": "",
-    "PUBLIC_HOST": ""
+    "PUBLIC_HOST": "",
+    "ENVIRONMENT": "production",
+    // Leave the endpoint empty to run without tracing. Any OTLP/HTTP collector
+    // works: Honeycomb, Grafana Cloud, Baselime, a self-hosted collector.
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "",
+    "OTEL_SAMPLE_RATIO": "1"
   },
   "observability": { "enabled": true }
 }
 // Secrets (set with `wrangler secret put <NAME>`), never in this file:
-//   SPLITWISE_CLIENT_ID, SPLITWISE_CLIENT_SECRET, GOODWILL_STATE_KEY
-// Create the KV namespaces with `wrangler kv namespace create OAUTH_KV` and
-// `wrangler kv namespace create GOODWILL_KV`, then paste the ids above.
+//   SPLITWISE_CLIENT_ID, SPLITWISE_CLIENT_SECRET, GOODWILL_STATE_KEY,
+//   OTEL_EXPORTER_OTLP_HEADERS
+// Create the KV namespace with `wrangler kv namespace create OAUTH_KV` and
+// paste the id above. The Durable Object needs no setup beyond the migration.

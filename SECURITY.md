@@ -22,7 +22,9 @@ Status: draft. Update as the build makes choices concrete.
 | Token theft from the server | Encrypted vault, secrets in platform secret storage, never in logs or responses. Client receives only a short-lived reference token. |
 | Token misuse by the model | The model never sees the token. Tools choose an API path, never a host or a credential. |
 | Prompt injection through comments or descriptions | Fetched text wrapped as data. Preview and confirm on every write. Injection cases in the eval set. |
-| Duplicate or runaway writes | Per-user write log with idempotency keys. Rate limit per user. No delete. |
+| Duplicate or runaway writes | Per-user write log with idempotency keys, reserved atomically before the upstream call. Per-user token bucket. No delete. |
+| Telemetry leaking user data | Traces carry a fixed allowlist of attribute keys, and values are reduced to an identifier-safe alphabet. Paths are route templates, so no expense, group or person id is exported. |
+| Retry storms during an upstream outage | Circuit breaker per isolate: refuse quickly rather than have every client retry a service that is trying to recover. |
 | Stranger connects to the hosted server | OAuth required. Email allowlist. Each user can only reach their own data. |
 | SSRF through tool arguments | Upstream host fixed in code. Inputs validated against schemas. |
 | Data in logs | No expense text, names, or amounts in logs. Hashed user and group ids only. |

@@ -8,6 +8,7 @@ import type { Deps, PendingWrite } from '../server/deps.js';
 import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, timed, untrusted } from '../server/format.js';
 import { type Invitee, describeResolution, resolveInvitee, resolveMember } from '../server/resolve.js';
 import type { SwAddUserToGroup, SwCreateExpenseByShares, SwCreateGroup, SwExpense, SwUser } from '../splitwise/types.js';
+import type { WriteRecord } from '../store/writeLog.js';
 import { AddExpenseOutput, AddMembersOutput, ConfirmSchema, GroupOutput, ItemSplitOutput, ReceiptItemInput, SettleOutputWrite, UpdateExpenseOutput } from './schemas.js';
 
 const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } as const;
@@ -35,6 +36,58 @@ async function annotate(deps: Deps, expenseId: number, what: string): Promise<bo
   } catch {
     return false;
   }
+}
+
+type WriteTool = 'add_expense' | 'update_expense' | 'create_group' | 'split_by_items' | 'settle_up';
+
+export const IN_FLIGHT_NOTE = 'An identical write is being posted right now by another request from this account. Refused, so it cannot land twice.';
+
+type Guarded<T> = { kind: 'duplicate'; record: WriteRecord } | { kind: 'in_flight' } | { kind: 'posted'; value: T };
+
+/**
+ * Reserve the fingerprint, do the upstream write, then close the reservation.
+ *
+ * The reservation is what makes the duplicate guard hold under concurrency. A
+ * plain lookup before the write leaves a window where a retry, a second device
+ * or an impatient client arrives, reads nothing, and posts a second copy. The
+ * claim closes that window: the loser is told the write is already in flight
+ * rather than being allowed to repeat it. A failed upstream call releases the
+ * reservation immediately so the person can try again at once.
+ */
+async function withClaim<T>(
+  deps: Deps,
+  tool: WriteTool,
+  userId: number,
+  fp: string,
+  idempotencyKey: string | undefined,
+  post: () => Promise<T>,
+  describe: (value: T) => { expenseId: number; description: string },
+): Promise<Guarded<T>> {
+  const claim = await deps.writeLog.claim(String(userId), fp, idempotencyKey);
+  if (claim.status === 'duplicate') {
+    deps.metrics.emit({ type: 'duplicate_blocked', tool, source: 'write_log' });
+    return { kind: 'duplicate', record: claim.record };
+  }
+  if (claim.status === 'in_flight') {
+    deps.metrics.emit({ type: 'duplicate_blocked', tool, source: 'write_log' });
+    return { kind: 'in_flight' };
+  }
+  let value: T;
+  try {
+    value = await post();
+  } catch (err) {
+    await deps.writeLog.release(String(userId), claim.token, fp, idempotencyKey);
+    throw err;
+  }
+  const { expenseId, description } = describe(value);
+  await deps.writeLog.record(String(userId), claim.token, {
+    fingerprint: fp,
+    ...(idempotencyKey ? { idempotencyKey } : {}),
+    expenseId,
+    createdAt: deps.now().toISOString(),
+    description,
+  });
+  return { kind: 'posted', value };
 }
 
 interface AddPayload {
@@ -115,7 +168,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       outputSchema: AddExpenseOutput,
       annotations: WRITE,
     },
-    timed(deps.metrics, 'add_expense', async (args, ctx) => {
+    timed(deps, 'add_expense', async (args, ctx) => {
       const denied = missingScope(ctx, 'add');
       if (denied) return denied;
       const me = await deps.me();
@@ -131,26 +184,32 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
           return ok('Cancelled. Nothing was posted.', { posted: false, group_id: args.group_id, note: 'Cancelled by the user.' });
         }
         deps.metrics.emit({ type: 'preview_confirmed', tool: 'add_expense' });
-        const existing = await deps.writeLog.find(String(me.id), pending.fingerprint, pending.idempotencyKey);
-        if (existing) {
-          deps.metrics.emit({ type: 'duplicate_blocked', tool: 'add_expense', source: 'write_log' });
-          return ok(`Already posted as expense #${existing.expenseId} ("${existing.description}"). Nothing new was created.`, {
+        const guard = await withClaim(
+          deps,
+          'add_expense',
+          me.id,
+          pending.fingerprint,
+          pending.idempotencyKey,
+          async () => {
+            const posted = await deps.client.createExpense(payload.body);
+            deps.metrics.emit({ type: 'write_posted', tool: 'add_expense' });
+            await annotate(deps, posted.id, `${payload.description}, ${payload.cost} ${payload.currency}, split with ${payload.affected.length + 1} ${payload.affected.length === 0 ? 'person' : 'people'}.`);
+            return posted;
+          },
+          (posted) => ({ expenseId: posted.id, description: payload.description }),
+        );
+        if (guard.kind === 'duplicate') {
+          return ok(`Already posted as expense #${guard.record.expenseId} ("${guard.record.description}"). Nothing new was created.`, {
             posted: false,
-            expense_id: existing.expenseId,
+            expense_id: guard.record.expenseId,
             group_id: args.group_id,
             note: 'A matching expense was posted in the last 48 hours. Refused to post again.',
           });
         }
-        const created = await deps.client.createExpense(payload.body);
-        deps.metrics.emit({ type: 'write_posted', tool: 'add_expense' });
-        await annotate(deps, created.id, `${payload.description}, ${payload.cost} ${payload.currency}, split with ${payload.affected.length + 1} ${payload.affected.length === 0 ? 'person' : 'people'}.`);
-        await deps.writeLog.record(String(me.id), {
-          fingerprint: pending.fingerprint,
-          ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
-          expenseId: created.id,
-          createdAt: deps.now().toISOString(),
-          description: payload.description,
-        });
+        if (guard.kind === 'in_flight') {
+          return ok('That expense is being posted right now by another request. Nothing new was created.', { posted: false, group_id: args.group_id, note: IN_FLIGHT_NOTE });
+        }
+        const created = guard.value;
         return ok(`Posted "${payload.description}" ${payload.cost} ${payload.currency} as expense #${created.id}. ${GROUP_URL(args.group_id)}`, {
           posted: true,
           expense_id: created.id,
@@ -289,7 +348,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       outputSchema: UpdateExpenseOutput,
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     },
-    timed(deps.metrics, 'update_expense', async (args, ctx) => {
+    timed(deps, 'update_expense', async (args, ctx) => {
       const denied = missingScope(ctx, 'modify');
       if (denied) return denied;
       const me = await deps.me();
@@ -304,25 +363,30 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
           return ok('Cancelled. The expense is unchanged.', { updated: false, expense_id: payload.expenseId, note: 'Cancelled by the user.' });
         }
         deps.metrics.emit({ type: 'preview_confirmed', tool: 'update_expense' });
-        const existing = await deps.writeLog.find(String(me.id), pending.fingerprint, pending.idempotencyKey);
-        if (existing) {
-          deps.metrics.emit({ type: 'duplicate_blocked', tool: 'update_expense', source: 'write_log' });
+        const guard = await withClaim(
+          deps,
+          'update_expense',
+          me.id,
+          pending.fingerprint,
+          pending.idempotencyKey,
+          async () => {
+            await deps.client.updateExpense(payload.expenseId, payload.body);
+            deps.metrics.emit({ type: 'write_posted', tool: 'update_expense' });
+            await annotate(deps, payload.expenseId, `Corrected: ${payload.changes.map((c) => `${c.field} ${c.from} to ${c.to}`).join('; ')}.`);
+            return payload.expenseId;
+          },
+          (expenseId) => ({ expenseId, description: payload.description }),
+        );
+        if (guard.kind === 'duplicate') {
           return ok(`That correction was already applied to #${payload.expenseId}. Nothing was changed again.`, {
             updated: false,
             expense_id: payload.expenseId,
             note: 'The same correction was applied in the last 48 hours. Refused to repeat it.',
           });
         }
-        await deps.client.updateExpense(payload.expenseId, payload.body);
-        deps.metrics.emit({ type: 'write_posted', tool: 'update_expense' });
-        await annotate(deps, payload.expenseId, `Corrected: ${payload.changes.map((c) => `${c.field} ${c.from} to ${c.to}`).join('; ')}.`);
-        await deps.writeLog.record(String(me.id), {
-          fingerprint: pending.fingerprint,
-          ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
-          expenseId: payload.expenseId,
-          createdAt: deps.now().toISOString(),
-          description: payload.description,
-        });
+        if (guard.kind === 'in_flight') {
+          return ok('That correction is being applied right now by another request. Nothing was changed again.', { updated: false, expense_id: payload.expenseId, note: IN_FLIGHT_NOTE });
+        }
         return ok(
           [`Updated #${payload.expenseId} "${payload.description}".`, ...payload.changes.map((c) => `  ${c.field}: ${c.from} -> ${c.to}`)].join('\n'),
           { updated: true, expense_id: payload.expenseId, changes: payload.changes, balance_changes: payload.balanceChanges, note: 'Updated. Everyone on the expense sees the new values.' },
@@ -446,7 +510,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       outputSchema: GroupOutput,
       annotations: WRITE,
     },
-    timed(deps.metrics, 'create_group', async (args, ctx) => {
+    timed(deps, 'create_group', async (args, ctx) => {
       const denied = missingScope(ctx, 'add');
       if (denied) return denied;
       const me = await deps.me();
@@ -461,24 +525,32 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
           return ok('Cancelled. No group was created.', { created: false, note: 'Cancelled by the user.' });
         }
         deps.metrics.emit({ type: 'preview_confirmed', tool: 'create_group' });
-        const existing = await deps.writeLog.find(String(me.id), pending.fingerprint, pending.idempotencyKey);
-        if (existing) {
-          deps.metrics.emit({ type: 'duplicate_blocked', tool: 'create_group', source: 'write_log' });
-          return ok(`A group called "${payload.name}" was already created (#${existing.expenseId}). Nothing new was created.`, {
+        const guard = await withClaim(
+          deps,
+          'create_group',
+          me.id,
+          pending.fingerprint,
+          pending.idempotencyKey,
+          async () => {
+            const made = await deps.client.createGroup(payload.body);
+            deps.metrics.emit({ type: 'write_posted', tool: 'create_group' });
+            // The group list is cached, and a group nobody can see yet reads as a failure.
+            await deps.client.invalidateGroups();
+            return made;
+          },
+          (made) => ({ expenseId: made.id, description: payload.name }),
+        );
+        if (guard.kind === 'duplicate') {
+          return ok(`A group called "${payload.name}" was already created (#${guard.record.expenseId}). Nothing new was created.`, {
             created: false,
-            group_id: existing.expenseId,
+            group_id: guard.record.expenseId,
             note: 'A matching group was created in the last 48 hours. Refused to create it again.',
           });
         }
-        const group = await deps.client.createGroup(payload.body);
-        deps.metrics.emit({ type: 'write_posted', tool: 'create_group' });
-        await deps.writeLog.record(String(me.id), {
-          fingerprint: pending.fingerprint,
-          ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
-          expenseId: group.id,
-          createdAt: deps.now().toISOString(),
-          description: payload.name,
-        });
+        if (guard.kind === 'in_flight') {
+          return ok('That group is being created right now by another request. Nothing new was created.', { created: false, note: IN_FLIGHT_NOTE });
+        }
+        const group = guard.value;
         const invited = payload.members.filter((m) => m.status === 'invited').length;
         return ok(
           `Created "${payload.name}" (${payload.groupType}) with ${payload.members.length} other ${payload.members.length === 1 ? 'person' : 'people'}${invited ? `, ${invited} of whom will get an invitation email` : ''}. ${GROUP_URL(group.id)}`,
@@ -565,7 +637,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       outputSchema: AddMembersOutput,
       annotations: WRITE,
     },
-    timed(deps.metrics, 'add_to_group', async (args, ctx) => {
+    timed(deps, 'add_to_group', async (args, ctx) => {
       const denied = missingScope(ctx, 'add');
       if (denied) return denied;
       const me = await deps.me();
@@ -591,6 +663,8 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
             results.push({ name: addition.name, status: 'failed', detail: (err as Error).message });
           }
         }
+        // Membership changed, so the cached group and group list are stale.
+        await deps.client.invalidateGroups(args.group_id);
         const failed = results.filter((r) => r.status === 'failed');
         if (results.some((r) => r.status !== 'failed')) deps.metrics.emit({ type: 'write_posted', tool: 'add_to_group' });
         const summary = results.filter((r) => r.status !== 'failed').map((r) => r.name);
@@ -682,7 +756,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       outputSchema: ItemSplitOutput,
       annotations: WRITE,
     },
-    timed(deps.metrics, 'split_by_items', async (args, ctx) => {
+    timed(deps, 'split_by_items', async (args, ctx) => {
       const denied = missingScope(ctx, 'add');
       if (denied) return denied;
       const me = await deps.me();
@@ -697,26 +771,32 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
           return ok('Cancelled. Nothing was posted.', { posted: false, group_id: args.group_id, note: 'Cancelled by the user.' });
         }
         deps.metrics.emit({ type: 'preview_confirmed', tool: 'split_by_items' });
-        const existing = await deps.writeLog.find(String(me.id), pending.fingerprint, pending.idempotencyKey);
-        if (existing) {
-          deps.metrics.emit({ type: 'duplicate_blocked', tool: 'split_by_items', source: 'write_log' });
-          return ok(`Already posted as expense #${existing.expenseId}. Nothing new was created.`, {
+        const guard = await withClaim(
+          deps,
+          'split_by_items',
+          me.id,
+          pending.fingerprint,
+          pending.idempotencyKey,
+          async () => {
+            const posted = await deps.client.createExpense(payload.body);
+            deps.metrics.emit({ type: 'write_posted', tool: 'split_by_items' });
+            await annotate(deps, posted.id, `Split by item: ${payload.breakdown.map((b) => `${b.person.name} ${b.owes}`).join(', ')}.`);
+            return posted;
+          },
+          (posted) => ({ expenseId: posted.id, description: payload.description }),
+        );
+        if (guard.kind === 'duplicate') {
+          return ok(`Already posted as expense #${guard.record.expenseId}. Nothing new was created.`, {
             posted: false,
-            expense_id: existing.expenseId,
+            expense_id: guard.record.expenseId,
             group_id: args.group_id,
             note: 'A matching expense was posted in the last 48 hours. Refused to post again.',
           });
         }
-        const created = await deps.client.createExpense(payload.body);
-        deps.metrics.emit({ type: 'write_posted', tool: 'split_by_items' });
-        await annotate(deps, created.id, `Split by item: ${payload.breakdown.map((b) => `${b.person.name} ${b.owes}`).join(', ')}.`);
-        await deps.writeLog.record(String(me.id), {
-          fingerprint: pending.fingerprint,
-          ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
-          expenseId: created.id,
-          createdAt: deps.now().toISOString(),
-          description: payload.description,
-        });
+        if (guard.kind === 'in_flight') {
+          return ok('That expense is being posted right now by another request. Nothing new was created.', { posted: false, group_id: args.group_id, note: IN_FLIGHT_NOTE });
+        }
+        const created = guard.value;
         return ok(`Posted "${payload.description}" ${payload.total} ${payload.currency} as expense #${created.id}, split by item. ${GROUP_URL(args.group_id)}`, {
           posted: true,
           expense_id: created.id,
@@ -861,7 +941,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       outputSchema: SettleOutputWrite,
       annotations: WRITE,
     },
-    timed(deps.metrics, 'settle_up', async (args, ctx) => {
+    timed(deps, 'settle_up', async (args, ctx) => {
       const denied = missingScope(ctx, 'add');
       if (denied) return denied;
       const me = await deps.me();
@@ -876,25 +956,31 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
           return ok('Cancelled. No payment was recorded.', { recorded: false, note: 'Cancelled by the user.' });
         }
         deps.metrics.emit({ type: 'preview_confirmed', tool: 'settle_up' });
-        const existing = await deps.writeLog.find(String(me.id), pending.fingerprint, pending.idempotencyKey);
-        if (existing) {
-          deps.metrics.emit({ type: 'duplicate_blocked', tool: 'settle_up', source: 'write_log' });
-          return ok(`Already recorded as #${existing.expenseId}. Nothing new was created.`, {
+        const guard = await withClaim(
+          deps,
+          'settle_up',
+          me.id,
+          pending.fingerprint,
+          pending.idempotencyKey,
+          async () => {
+            const posted = await deps.client.createExpense(payload.body);
+            deps.metrics.emit({ type: 'write_posted', tool: 'settle_up' });
+            await annotate(deps, posted.id, `Recorded a payment of ${payload.amount} ${payload.currency} from ${payload.fromName} to ${payload.toName}.`);
+            return posted;
+          },
+          (posted) => ({ expenseId: posted.id, description: `Payment ${payload.amount} ${payload.currency}` }),
+        );
+        if (guard.kind === 'duplicate') {
+          return ok(`Already recorded as #${guard.record.expenseId}. Nothing new was created.`, {
             recorded: false,
-            expense_id: existing.expenseId,
+            expense_id: guard.record.expenseId,
             note: 'A matching payment was recorded in the last 48 hours. Refused to record it again.',
           });
         }
-        const created = await deps.client.createExpense(payload.body);
-        deps.metrics.emit({ type: 'write_posted', tool: 'settle_up' });
-        await annotate(deps, created.id, `Recorded a payment of ${payload.amount} ${payload.currency} from ${payload.fromName} to ${payload.toName}.`);
-        await deps.writeLog.record(String(me.id), {
-          fingerprint: pending.fingerprint,
-          ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
-          expenseId: created.id,
-          createdAt: deps.now().toISOString(),
-          description: `Payment ${payload.amount} ${payload.currency}`,
-        });
+        if (guard.kind === 'in_flight') {
+          return ok('That payment is being recorded right now by another request. Nothing new was created.', { recorded: false, note: IN_FLIGHT_NOTE });
+        }
+        const created = guard.value;
         return ok(`Recorded: ${payload.fromName} paid ${payload.toName} ${payload.amount} ${payload.currency}. Balance updated.`, {
           recorded: true,
           expense_id: created.id,
