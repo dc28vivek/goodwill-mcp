@@ -1,6 +1,6 @@
 import { Client, InMemoryTransport } from '@modelcontextprotocol/client';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { buildServer } from '../src/server/build.js';
+import { SERVER_CACHE_HINTS, buildServer } from '../src/server/build.js';
 import { createDeps } from '../src/server/env.js';
 import { memoryMetrics } from '../src/server/metrics.js';
 import { fakeFetch, makeState, type FakeState } from './fixtures/fakeSplitwise.js';
@@ -105,6 +105,17 @@ describe('splittab server', () => {
     expect(props.older_than_days?.type).toBe('integer');
     const gprops = groups.inputSchema.properties as Record<string, { type?: string }>;
     expect(gprops.unsettled_only?.type).toBe('boolean');
+  });
+
+  it('does not let a client hold the tool surface long enough to hide a new tool', async () => {
+    // A day-long tools/list cache meant a tool shipped at noon was invisible to
+    // a connected client until noon the next day, and the client reported it
+    // did not exist. Listing tools costs no upstream call, so there is nothing
+    // to buy by caching it hard.
+    const hints = SERVER_CACHE_HINTS;
+    for (const key of ['tools/list', 'prompts/list', 'resources/list', 'server/discover'] as const) {
+      expect(hints[key]?.ttlMs).toBeLessThanOrEqual(10 * 60_000);
+    }
   });
 
   it('serves the groups resource trimmed', async () => {

@@ -16,18 +16,38 @@ Rules:
 4. Amounts are decimal strings with a currency code. Do not convert between currencies.
 5. Tools that take a group need its numeric id. Call list_groups first to get it, and to see who is in each group. The splitwise://groups resource holds the same thing for clients that surface resources.`;
 
+const MINUTE = 60_000;
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
+
+/**
+ * How long a client may hold the tool surface.
+ *
+ * This was a day, which was wrong in a way only production showed. Listing
+ * tools costs no Splitwise call at all: it is schema generated in memory, so
+ * caching it buys one cheap round trip and nothing else. What it costs is the
+ * ability to ship. A tool added at noon did not reach a connected client until
+ * noon the next day, and the client kept confidently reporting that the tool
+ * did not exist, because as far as it knew that was true.
+ *
+ * Stateless servers cannot push a list_changed notification, so the TTL is the
+ * only lever. Short, because the thing it protects is nearly free and the thing
+ * it delays is every fix.
+ */
+const LIST_TTL = 5 * MINUTE;
+
+/** Exported so a test can assert the tool surface stays refreshable. */
+export const SERVER_CACHE_HINTS = {
+  'tools/list': { ttlMs: LIST_TTL, cacheScope: 'public' },
+  'prompts/list': { ttlMs: LIST_TTL, cacheScope: 'public' },
+  'resources/list': { ttlMs: LIST_TTL, cacheScope: 'public' },
+  'server/discover': { ttlMs: LIST_TTL, cacheScope: 'public' },
+} as const;
 
 export function buildServer(deps: Deps): McpServer {
   const server = new McpServer(SERVER_INFO, {
     instructions: INSTRUCTIONS,
-    cacheHints: {
-      'tools/list': { ttlMs: DAY, cacheScope: 'public' },
-      'prompts/list': { ttlMs: DAY, cacheScope: 'public' },
-      'resources/list': { ttlMs: DAY, cacheScope: 'public' },
-      'server/discover': { ttlMs: DAY, cacheScope: 'public' },
-    },
+    cacheHints: SERVER_CACHE_HINTS,
     requestState: { verify: (state, ctx) => deps.codec.verify(state, ctx) },
   });
 
