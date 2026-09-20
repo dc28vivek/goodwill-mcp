@@ -119,3 +119,12 @@ describe('changeSummary', () => {
     expect(changeSummary('Some unrelated system note')).toBeNull();
   });
 });
+
+describe('entity decoding', () => {
+  it('decodes hex entities, which Splitwise uses for apostrophes', () => {
+    expect(toPlainText('You added <strong>Trader Joe&#x27;s</strong>')).toBe("You added Trader Joe's");
+  });
+  it('decodes decimal entities too', () => {
+    expect(toPlainText('Ben &#38; Jerry&#39;s')).toBe("Ben & Jerry's");
+  });
+});

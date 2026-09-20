@@ -16,7 +16,17 @@ import { buildServer } from '../src/server/build.js';
 import { createDeps } from '../src/server/env.js';
 import { noopMetrics } from '../src/server/metrics.js';
 
-const READ_ONLY = ['explain_balance', 'overall_balances', 'stale_balances', 'settle_plan', 'find_duplicates', 'find_missing_expenses'];
+const READ_ONLY = [
+  'explain_balance',
+  'list_expenses',
+  'read_expense',
+  'recent_activity',
+  'overall_balances',
+  'find_missing_expenses',
+  'stale_balances',
+  'settle_plan',
+  'find_duplicates',
+];
 
 const token = process.env.SPLITWISE_API_KEY;
 if (!token) {
@@ -73,6 +83,7 @@ async function main() {
   if (pending.length) console.log(`Members who have not joined yet: ${pending.join(', ')}`);
 
   await run('overall_balances', 'overall_balances', {});
+  await run('recent_activity (14 days)', 'recent_activity', { since: new Date(Date.now() - 14 * 86_400_000).toISOString().slice(0, 10) });
   await run('stale_balances (30 days)', 'stale_balances', { older_than_days: 30 });
 
   // A group id or name fragment can be passed: `npm run doctor -- 34196144`.
@@ -89,8 +100,15 @@ async function main() {
     await run(`explain_balance (whole group)`, 'explain_balance', { group_id: target.id });
     await run(`settle_plan`, 'settle_plan', { group_id: target.id });
     await run(`find_duplicates (365 days)`, 'find_duplicates', { group_id: target.id, since_days: 365 });
+    await run(`list_expenses (90 days)`, 'list_expenses', { group_id: target.id });
     const other = target.members.find((m) => m.id !== me.id);
-    if (other) await run(`explain_balance (one person)`, 'explain_balance', { group_id: target.id, friend: String(other.id) });
+    if (other) {
+      await run(`explain_balance (one person)`, 'explain_balance', { group_id: target.id, friend: String(other.id) });
+      await run(`explain_balance (since last payment)`, 'explain_balance', { group_id: target.id, friend: String(other.id), since: 'last_payment' });
+    }
+    // Read one real expense in full, whichever the listing surfaced first.
+    const recent = (await deps.client.allExpenses({ group_id: target.id }, 20)).find((e) => !e.deleted_at);
+    if (recent) await run(`read_expense (#${recent.id})`, 'read_expense', { expense_id: recent.id });
     await run('find_missing_expenses (invented charge)', 'find_missing_expenses', {
       group_id: target.id,
       currency: me.default_currency ?? 'USD',

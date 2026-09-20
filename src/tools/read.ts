@@ -154,7 +154,13 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
             : b.since === 'last_payment'
               ? `since the payment on ${b.opens_after}`
               : `since ${b.opens_after}`;
-        const windowNote = b.opens_after ? `  (${why}; ${b.closed_count} earlier ${b.closed_count === 1 ? 'item' : 'items'} summarised above)` : '';
+        const windowNote = b.opens_after ? `  (${why}; ${b.closed_count} earlier ${b.closed_count === 1 ? 'item' : 'items'} rolled into the figure below)` : '';
+        // A window with nothing in it means the balance has simply sat there.
+        // Printing "brought forward 121.56 / Left 121.56" says the same number
+        // twice and implies activity that did not happen.
+        if (b.expense_count === 0 && b.payment_count === 0 && b.opens_after) {
+          return `${head}\n  Nothing has happened ${why}. The balance has stood at ${b.remaining} ${b.currency} since then.`;
+        }
         if (!oneCounterparty) return [head + windowNote, ...statement].join('\n');
         const items = b.contributions.map((c) => {
           const of = c.kind === 'payment' ? '' : `  (${c.share_percent}% of ${c.total})`;
@@ -261,7 +267,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         ? [
             `${expenses.length} expense${expenses.length === 1 ? '' : 's'}${groupName ? ` in ${groupName}` : ''} from ${from} to ${to}:`,
             ...expenses.map(
-              (e) => `  ${e.date}  ${e.cost.padStart(9)} ${e.currency}  ${e.description}  (paid by ${e.paid_by}, your share ${e.your_share}, split ${e.split_between} ways${e.comment_count ? `, ${e.comment_count} comment${e.comment_count === 1 ? '' : 's'}` : ''})`,
+              (e) => `  ${e.date}  ${e.cost.padStart(9)} ${e.currency}  ${e.description}  (paid by ${e.paid_by}, your share ${e.your_share}, split ${e.split_between} ${e.split_between === 1 ? 'way' : 'ways'}${e.comment_count ? `, ${e.comment_count} comment${e.comment_count === 1 ? '' : 's'}` : ''})`,
             ),
           ].join('\n')
         : `No expenses${groupName ? ` in ${groupName}` : ''} between ${from} and ${to}${needle ? ` matching "${needle}"` : ''}.`;

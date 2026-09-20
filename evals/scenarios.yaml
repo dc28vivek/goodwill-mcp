@@ -83,7 +83,7 @@
     isError: false
     structured.balances.0.since: last_payment
     structured.balances.0.brought_forward: "20.00"
-    text_includes: ["Sam K already owed", "since the payment on 2026-09-06"]
+    text_includes: ["Nothing has happened since the payment on 2026-09-06", "has stood at 20.00 EUR since then"]
 
 - id: explain-since-date
   prompt: "Explain what Priya owes me since the 4th of September"

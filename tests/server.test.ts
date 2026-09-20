@@ -383,9 +383,12 @@ describe('goodwill server', () => {
     const { client } = await connect(state);
     const r = await client.callTool({ name: 'explain_balance', arguments: { group_id: 100, friend: 'Sam', since: 'last_payment' } });
     const sc = r.structuredContent as { balances: { since: string; brought_forward: string; remaining: string; expense_count: number }[] };
-    // Sam was charged 69 and paid 49 on 2026-09-06; nothing since, so 20 carried forward.
+    // Sam was charged 69 and paid 49 on 2026-09-06, and nothing has happened since.
     expect(sc.balances[0]).toMatchObject({ since: 'last_payment', brought_forward: '20.00', remaining: '20.00', expense_count: 0 });
-    expect(String((r.content[0] as { text: string }).text)).toContain('Sam K already owed');
+    // An empty window says so once rather than printing the same number twice.
+    const text = String((r.content[0] as { text: string }).text);
+    expect(text).toContain('Nothing has happened since the payment on 2026-09-06');
+    expect(text).toContain('has stood at 20.00 EUR since then');
   });
 
   it('can explain from a date', async () => {
