@@ -32,7 +32,7 @@ describe('goodwill server', () => {
   it('lists six tools with honest annotations and fixed order', async () => {
     const { client } = await connect(state);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'list_expenses', 'read_expense', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'update_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up', 'nudge']);
+    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'list_expenses', 'read_expense', 'recent_activity', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'update_expense', 'create_group', 'add_to_group', 'split_by_items', 'settle_up', 'nudge']);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.explain_balance?.annotations?.readOnlyHint).toBe(true);
     expect(byName.add_expense?.annotations?.readOnlyHint).toBe(false);
@@ -521,4 +521,57 @@ describe('goodwill server', () => {
     expect((again.structuredContent as { updated: boolean }).updated).toBe(false);
     expect(state.writes.filter((w) => w.path === '/update_expense')).toHaveLength(1);
   });
+
+  it('reports only what involves you, grouped by group, with the HTML stripped', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'recent_activity', arguments: { since: '2026-09-14' } });
+    const sc = r.structuredContent as { returned: number; events: { what: string; group: string | null }[] };
+    // Two expense events touch this user. A stranger's group change and an
+    // unknown event by someone else are left out.
+    expect(sc.returned).toBe(2);
+    expect(sc.events[0]?.what).toBe('Priya S. added Dinner at Cervejaria. You owe 28.00 EUR');
+    expect(sc.events[0]?.group).toBe('Lisbon');
+    const text = String((r.content[0] as { text: string }).text);
+    expect(text).toContain('Lisbon:');
+    expect(text).not.toContain('<strong>');
+  });
+
+  it('says how many events it left out rather than hiding them silently', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'recent_activity', arguments: { since: '2026-09-14' } });
+    expect(String((r.content[0] as { text: string }).text)).toContain('2 other events did not involve you and are not listed.');
+  });
+
+  it('shows everything when asked', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'recent_activity', arguments: { since: '2026-09-14', everything: true } });
+    const sc = r.structuredContent as { returned: number; events: { what: string; group: string | null; group_id: number | null }[] };
+    expect(sc.returned).toBe(4);
+    const membership = sc.events.find((e) => e.what.includes('removed'));
+    // A group event names its own group, so it is placed without an expense.
+    expect(membership).toMatchObject({ group: 'Lisbon', group_id: 100 });
+    expect(sc.events.some((e) => e.what === 'A brand new kind of event')).toBe(true);
+  });
+
+  it('honours the since date', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'recent_activity', arguments: { since: '2026-09-16' } });
+    expect((r.structuredContent as { returned: number }).returned).toBe(2);
+  });
+
+  it('can narrow to one group', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'recent_activity', arguments: { since: '2026-09-14', group_id: 100 } });
+    const sc = r.structuredContent as { returned: number; events: { group_id: number | null }[] };
+    expect(sc.returned).toBe(2);
+    for (const e of sc.events) expect(e.group_id).toBe(100);
+  });
+
+  it('says plainly when nothing involving you has happened', async () => {
+    const { client } = await connect(state);
+    const r = await client.callTool({ name: 'recent_activity', arguments: { since: '2026-09-19' } });
+    expect((r.structuredContent as { returned: number }).returned).toBe(0);
+    expect(String((r.content[0] as { text: string }).text)).toContain('Nothing involving you');
+  });
+
 });

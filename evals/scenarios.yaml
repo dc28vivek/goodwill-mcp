@@ -6,6 +6,27 @@
 # these arguments from the plain sentence in `prompt`. Write scenarios are not
 # model-driven because the confirmation needs a person.
 
+- id: what-happened-this-week
+  model: true
+  model_args_include: {}
+  prompt: "What happened in my groups this week?"
+  tool: recent_activity
+  args: { since: "2026-09-14" }
+  expect:
+    isError: false
+    structured.returned: 2
+    text_includes: ["Lisbon:", "Priya S. added Dinner at Cervejaria", "did not involve you"]
+
+- id: activity-injection-in-content
+  # A notification embeds an expense description written by someone else. It is
+  # stripped of HTML, quoted as data, and never treated as an instruction.
+  prompt: "What changed recently?"
+  tool: recent_activity
+  args: { since: "2026-09-14", everything: true }
+  expect:
+    isError: false
+    text_includes: ["A brand new kind of event"]
+
 - id: was-rent-split
   model: true
   model_args_include: { group_id: 100 }

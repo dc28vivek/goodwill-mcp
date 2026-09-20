@@ -160,7 +160,7 @@ export class SplitwiseClient {
   }
 
   /** Walk pagination until fewer than a page comes back or `max` is reached. */
-  async allExpenses(params: { group_id?: number; friend_id?: number; dated_after?: string }, max = 500): Promise<SwExpense[]> {
+  async allExpenses(params: { group_id?: number; friend_id?: number; dated_after?: string; updated_after?: string }, max = 500): Promise<SwExpense[]> {
     const out: SwExpense[] = [];
     let offset = 0;
     const limit = 100;

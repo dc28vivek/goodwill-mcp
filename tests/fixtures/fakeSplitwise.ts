@@ -1,4 +1,4 @@
-import type { SwComment, SwExpense, SwFriend, SwGroup, SwUser } from '../../src/splitwise/types.js';
+import type { SwComment, SwExpense, SwFriend, SwGroup, SwNotification, SwUser } from '../../src/splitwise/types.js';
 import { LISBON, LISBON_EXPENSES, ME, PRIYA, SAM } from './lisbon.js';
 
 /**
@@ -11,6 +11,7 @@ export interface FakeState {
   friends: SwFriend[];
   expenses: SwExpense[];
   comments: SwComment[];
+  notifications: SwNotification[];
   writes: { path: string; body: unknown }[];
   nextId: number;
 }
@@ -33,6 +34,13 @@ export function makeState(): FakeState {
     friends,
     expenses: LISBON_EXPENSES.map((e) => ({ ...e })),
     comments: [],
+    notifications: [
+      { id: 1, type: 0, created_at: '2026-09-17T09:00:00Z', created_by: 2, source: { type: 'Expense', id: 1001, url: null }, content: '<strong>Priya S.</strong> added <strong>Dinner at Cervejaria</strong>.<br><font color="#5bc5a7">You owe 28.00 EUR</font>' },
+      { id: 2, type: 3, created_at: '2026-09-16T09:00:00Z', created_by: 3, source: { type: 'Expense', id: 1002, url: null }, content: '<strong>Sam K.</strong> commented on <strong>Airbnb</strong>' },
+      { id: 3, type: 99, created_at: '2026-09-15T09:00:00Z', created_by: 2, source: null, content: 'A brand new kind of event' },
+      { id: 5, type: 5, created_at: '2026-09-15T10:00:00Z', created_by: 3, source: { type: 'Group', id: 100, url: null }, content: '<strong>Sam K.</strong> removed <strong>VV</strong> from the group <strong>Lisbon</strong>.' },
+      { id: 4, type: 0, created_at: '2026-08-01T09:00:00Z', created_by: 2, source: { type: 'Expense', id: 1003, url: null }, content: 'Something older' },
+    ],
     writes: [],
     nextId: 5000,
   };
@@ -61,7 +69,10 @@ export function fakeFetch(state: FakeState): typeof fetch {
     if (path === '/get_expenses') {
       const gid = url.searchParams.get('group_id');
       const fid = url.searchParams.get('friend_id');
+      // dated_after filters on when the expense happened; updated_after on when
+      // it was last touched. Conflating them hides recently edited old expenses.
       const after = url.searchParams.get('dated_after');
+      const updatedAfter = url.searchParams.get('updated_after');
       const before = url.searchParams.get('dated_before');
       const limit = Number(url.searchParams.get('limit') ?? 20);
       const offset = Number(url.searchParams.get('offset') ?? 0);
@@ -69,6 +80,7 @@ export function fakeFetch(state: FakeState): typeof fetch {
       if (gid) list = list.filter((e) => e.group_id === Number(gid));
       if (fid) list = list.filter((e) => e.users.some((u) => u.user_id === Number(fid)));
       if (after) list = list.filter((e) => e.date >= after);
+      if (updatedAfter) list = list.filter((e) => e.updated_at >= updatedAfter);
       if (before) list = list.filter((e) => e.date <= before);
       return json({ expenses: list.slice(offset, offset + limit) });
     }
@@ -185,6 +197,11 @@ export function fakeFetch(state: FakeState): typeof fetch {
       }
       g.members.push({ ...user, balance: [] });
       return json({ success: true, user });
+    }
+    if (path === '/get_notifications') {
+      const after = url.searchParams.get('updated_after');
+      const all = state.notifications.filter((n) => (after ? n.created_at >= after : true));
+      return json({ notifications: all });
     }
     if (path === '/get_categories') return json({ categories: [{ id: 1, name: 'Utilities', subcategories: [{ id: 5, name: 'Electricity' }] }, { id: 25, name: 'Food and drink', subcategories: [{ id: 13, name: 'Dining out' }] }] });
     if (path === '/get_currencies') return json({ currencies: [{ currency_code: 'EUR', unit: '€' }, { currency_code: 'USD', unit: '$' }, { currency_code: 'INR', unit: '₹' }] });

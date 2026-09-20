@@ -2,6 +2,7 @@ import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { type Transaction, findDuplicateClusters, findMissingExpenses, payerOf, toExpenseLike } from '../domain/dedupe.js';
 import type { SwExpense } from '../splitwise/types.js';
+import { KIND_LABELS, toActivity } from '../domain/activity.js';
 import { type SinceMode, explainBalance } from '../domain/explain.js';
 import { fromMinor, toMinor } from '../domain/money.js';
 import { overallPosition } from '../domain/position.js';
@@ -11,7 +12,7 @@ import type { Deps } from '../server/deps.js';
 import { GROUP_URL, fail, fullName, missingScope, ok, timed, untrusted } from '../server/format.js';
 import { describeResolution, resolveMember } from '../server/resolve.js';
 import type { SwUser } from '../splitwise/types.js';
-import { ExplainOutput, ListExpensesOutput, MissingOutput, OverallOutput, ReadExpenseOutput, ReconcileOutput, SettleOutput, StaleOutput, TransactionInput } from './schemas.js';
+import { ActivityOutput, ExplainOutput, ListExpensesOutput, MissingOutput, OverallOutput, ReadExpenseOutput, ReconcileOutput, SettleOutput, StaleOutput, TransactionInput } from './schemas.js';
 
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
 
@@ -315,6 +316,105 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       return ok(text, {
         expense: { ...row, notes: e.details ? untrusted(e.details, 300) : null, created_by: e.created_by ? fullName(e.created_by) : null, shares, comments },
       });
+    }),
+  );
+
+  server.registerTool(
+    'recent_activity',
+    {
+      title: 'What changed recently',
+      description:
+        'The activity feed across your Splitwise account: expenses added, updated or deleted, comments, people joining groups, settle-ups. Use it for "what happened this week", "did anyone add anything since Friday", or "has Priya paid yet". This is the only thing that reports what changed; every other tool reports the current state.',
+      inputSchema: z.object({
+        since: z.string().optional().describe('YYYY-MM-DD. Defaults to 7 days ago.'),
+        group_id: z.number().int().optional().describe('Only events that can be traced to this group.'),
+        everything: z
+          .boolean()
+          .default(false)
+          .describe('By default only events that touch your own money are returned. Set true to include the rest: other people joining or leaving groups, settings changes, news.'),
+        limit: z.number().int().min(1).max(200).default(50),
+      }),
+      outputSchema: ActivityOutput,
+      annotations: READ,
+    },
+    timed(deps.metrics, 'recent_activity', async ({ since, group_id, everything, limit }, ctx) => {
+      const denied = missingScope(ctx, 'read');
+      if (denied) return denied;
+      const now = deps.now();
+      const from = since ?? new Date(now.getTime() - 7 * 86_400_000).toISOString().slice(0, 10);
+      if (Number.isNaN(Date.parse(from))) return fail('A date like "2026-09-01", please.');
+      const after = `${from}T00:00:00Z`;
+
+      // Notifications are account-wide and name only an expense id, so one
+      // extra call maps ids to groups. Fetching expenses touched in the same
+      // window keeps that to two calls rather than one per event.
+      const [me, notifications, touched, groups] = await Promise.all([
+        deps.me(),
+        deps.client.notifications({ updated_after: after, limit: Math.max(limit * 3, 200) }),
+        deps.client.allExpenses({ updated_after: after }, 400),
+        deps.client.groups(),
+      ]);
+      const groupName = new Map(groups.map((g) => [g.id, untrusted(g.name, 60)]));
+      const expenseGroup = new Map(touched.map((e) => [e.id, e.group_id]));
+      // An expense event matters to this person only if their own money moved.
+      // Someone else's expense in a shared group is not their business.
+      const touchesMe = new Set(
+        touched
+          .filter((e) => e.users.some((u) => u.user_id === me.id && (toMinor(u.owed_share) !== 0 || toMinor(u.paid_share) !== 0)))
+          .map((e) => e.id),
+      );
+
+      const events = notifications
+        .map(toActivity)
+        .map((a) => {
+          // An event points at either an expense or a group. Expense events
+          // need the id-to-group map; group events (someone joining, settings
+          // changing) already name their group directly. Missing the second
+          // kind filed real events under "not in a group".
+          const gid =
+            a.sourceType === 'Group'
+              ? a.sourceId
+              : a.sourceType === 'Expense' && a.sourceId !== null
+                ? (expenseGroup.get(a.sourceId) ?? null)
+                : null;
+          return {
+            at: a.at.slice(0, 10),
+            kind: KIND_LABELS[a.kind],
+            what: untrusted(a.text, 200),
+            group: gid !== null && gid !== 0 ? (groupName.get(gid) ?? null) : null,
+            group_id: gid !== null && gid !== 0 ? gid : null,
+            expense_id: a.sourceType === 'Expense' ? a.sourceId : null,
+            by_me: a.byUserId === me.id,
+          };
+        })
+        .filter((e) => e.at >= from)
+        .filter((e) => (group_id === undefined ? true : e.group_id === group_id));
+
+      // Relevance is decided from the data, never by reading the wording: an
+      // event counts when it moved this person's money, or when they did it.
+      const mine = events.filter((e) => (e.expense_id !== null && touchesMe.has(e.expense_id)) || e.by_me);
+      const hidden = events.length - mine.length;
+      const kept = everything ? events : mine;
+      const shown = kept.slice(0, limit);
+      if (shown.length === 0) {
+        const note = !everything && hidden > 0 ? ` ${hidden} other ${hidden === 1 ? 'thing' : 'things'} happened that did not involve you; ask for everything to see them.` : '';
+        return ok(`Nothing involving you has happened since ${from}${group_id !== undefined ? ' in that group' : ''}.${note}`, { since: from, returned: 0, more_available: false, events: [] });
+      }
+
+      // Group the lines by group so a week reads as a digest rather than a list.
+      const buckets = new Map<string, typeof shown>();
+      for (const e of shown) {
+        const key = e.group ?? 'Not in a group';
+        buckets.set(key, [...(buckets.get(key) ?? []), e]);
+      }
+      const text = [
+        `${shown.length} thing${shown.length === 1 ? '' : 's'} involving you since ${from}:`,
+        ...[...buckets.entries()].flatMap(([name, list]) => ['', `${name}:`, ...list.map((e) => `  ${e.at}  ${e.what}`)]),
+        ...(!everything && hidden > 0 ? ['', `${hidden} other ${hidden === 1 ? 'event' : 'events'} did not involve you and are not listed.`] : []),
+      ].join('\n');
+
+      const structured = shown.map(({ by_me: _b, ...rest }) => rest);
+      return ok(text, { since: from, returned: shown.length, more_available: kept.length > shown.length, events: structured });
     }),
   );
 

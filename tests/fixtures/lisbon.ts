@@ -55,12 +55,15 @@ export const LISBON_EXPENSES: SwExpense[] = [
     description: 'Dinner at Cervejaria',
     cost: '84.00',
     date: '2026-09-05T19:00:00Z',
+    // Incurred on the 5th, edited on the 17th: the case updated_after exists for.
+    updated_at: '2026-09-17T09:00:00Z',
     users: [share(ME, '84.00', '28.00'), share(PRIYA, '0', '28.00'), share(SAM, '0', '28.00')],
   }),
   expense({
     description: 'Airbnb',
     cost: '99.00',
     date: '2026-09-04T12:00:00Z',
+    updated_at: '2026-09-16T09:00:00Z',
     category: { id: 6, name: 'Rent' },
     users: [share(ME, '99.00', '33.00'), share(PRIYA, '0', '33.00'), share(SAM, '0', '33.00')],
   }),

@@ -34,6 +34,7 @@ Your key stays on your machine. Nothing is sent anywhere except Splitwise's own 
 
 ## What you can ask it
 
+- *"What happened in my groups this week?"* — the activity feed, grouped by group
 - *"Was rent split this month?"* — it lists the expenses, you judge what counts as rent
 - *"How much do I owe overall, and how much is owed to me?"*
 - *"Why do I owe Priya 61?"* — every expense with its total and your share of it
@@ -49,11 +50,12 @@ Your key stays on your machine. Nothing is sent anywhere except Splitwise's own 
 - *"Priya paid me back, record it"* — closes the balance
 - *"Remind Sam, gently"* — drafts a comment in the tone you pick, then waits
 
-Fifteen tools, three resources, one prompt:
+Sixteen tools, three resources, one prompt:
 
 | Tool | What it does | Writes? |
 |---|---|---|
 | `explain_balance` | Charged, paid back, what's left, and every expense with your share of it | no |
+| `recent_activity` | What changed: expenses added, comments, people joining, settle-ups | no |
 | `list_expenses` | What was spent in a group or with a person, over a date range | no |
 | `read_expense` | One expense in full: every share, the notes, the comment thread | no |
 | `overall_balances` | Everything you owe and are owed, across every group | no |
