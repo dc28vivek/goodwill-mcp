@@ -22,6 +22,7 @@ Status: draft. Update as the build makes choices concrete.
 | Token theft from the server | Encrypted vault, secrets in platform secret storage, never in logs or responses. Client receives only a short-lived reference token. |
 | Token misuse by the model | The model never sees the token. Tools choose an API path, never a host or a credential. |
 | Prompt injection through comments or descriptions | Fetched text wrapped as data. Preview and confirm on every write. Injection cases in the eval set. |
+| Replay of a sign-in link | The OAuth state is signed and carries the hash of an HttpOnly cookie set at `/authorize`, so it works in one browser and once. Without it a self-contained state is replayable for its whole life, which allows binding someone's client to an attacker's Splitwise account. |
 | Duplicate or runaway writes | Per-user write log with idempotency keys, reserved atomically before the upstream call. Per-user token bucket. No delete. |
 | Telemetry leaking user data | Traces carry a fixed allowlist of attribute keys, and values are reduced to an identifier-safe alphabet. Paths are route templates, so no expense, group or person id is exported. |
 | Retry storms during an upstream outage | Circuit breaker per isolate: refuse quickly rather than have every client retry a service that is trying to recover. |

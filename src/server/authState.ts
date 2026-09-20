@@ -74,3 +74,56 @@ export async function verifyState<T>(secret: string | Uint8Array, token: string,
   if (wrapper.e * 1000 <= now) return { ok: false, reason: 'expired' };
   return { ok: true, payload: wrapper.p as T };
 }
+
+/**
+ * Browser binding for the signed state.
+ *
+ * Signing the state proves this server issued it. It does not prove the person
+ * finishing the flow is the person who started it, and because the state is
+ * self-contained there is no store to delete it from, so it stays valid for its
+ * full ten minutes. Someone who obtains another person's state can pair it with
+ * an authorization code for their own Splitwise account and have the victim's
+ * client linked to the attacker's ledger, which then feeds attacker-controlled
+ * expense text to the victim's agent.
+ *
+ * The fix costs no storage. `/authorize` puts a random value in an HttpOnly
+ * cookie and the hash of that value inside the signed state. `/callback`
+ * requires the two to agree, so a state is usable only in the browser that
+ * started the flow, and only until the cookie is cleared. SameSite=Lax is
+ * deliberate: the callback arrives as a top-level cross-site GET redirect from
+ * Splitwise, which Lax allows and Strict would block.
+ *
+ * See ADR-0015.
+ */
+
+/** A fresh binding secret to hand to the browser. */
+export function newBinding(): string {
+  return b64url(crypto.getRandomValues(new Uint8Array(32)));
+}
+
+/** The hash of a binding, safe to embed in the state that travels via Splitwise. */
+export async function bindingDigest(binding: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(binding));
+  let out = '';
+  for (const b of new Uint8Array(digest)) out += b.toString(16).padStart(2, '0');
+  return out;
+}
+
+/** Comparison that does not leak how much of the value matched. */
+export function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i += 1) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
+/** Read one cookie out of a Cookie header. Returns undefined when absent. */
+export function readCookie(header: string | null | undefined, name: string): string | undefined {
+  if (!header) return undefined;
+  for (const part of header.split(';')) {
+    const eq = part.indexOf('=');
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim() === name) return part.slice(eq + 1).trim();
+  }
+  return undefined;
+}

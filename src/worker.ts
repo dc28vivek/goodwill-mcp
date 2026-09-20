@@ -26,7 +26,7 @@ import { WorkerEntrypoint } from 'cloudflare:workers';
 import { createMcpHandler, hostHeaderValidationResponse, preloadSchemas } from '@modelcontextprotocol/server';
 import { OtlpTracer, type Tracer, noopTracer, parseTraceparent } from './obs/trace.js';
 import { buildServer, SERVER_INFO } from './server/build.js';
-import { signState, verifyState } from './server/authState.js';
+import { bindingDigest, newBinding, readCookie, safeEqual, signState, verifyState } from './server/authState.js';
 import { createDeps } from './server/env.js';
 import { WorkersCache } from './splitwise/cache.js';
 import { DurableBudget, DurableWriteLog, UserState, userStateStub } from './worker/userState.js';
@@ -72,6 +72,29 @@ const SPLITWISE_AUTHORIZE = 'https://secure.splitwise.com/oauth/authorize';
 const SPLITWISE_TOKEN = 'https://secure.splitwise.com/oauth/token';
 const SPLITWISE_ME = 'https://secure.splitwise.com/api/v3.0/get_current_user';
 const STATE_TTL_SECONDS = 600;
+const STATE_COOKIE = 'gw_state';
+
+/** What travels through Splitwise in the state parameter. */
+interface StatePayload {
+  req: AuthRequest;
+  /** Hash of the binding cookie, so the state only works in the browser that started the flow. */
+  bind: string;
+}
+
+/**
+ * Scoped to /callback so it is never sent anywhere else, and SameSite=Lax so it
+ * survives the top-level redirect back from Splitwise. Strict would drop it.
+ */
+function bindingCookie(value: string, maxAgeSeconds: number): string {
+  return `${STATE_COOKIE}=${value}; HttpOnly; Secure; SameSite=Lax; Path=/callback; Max-Age=${maxAgeSeconds}`;
+}
+
+/** A redirect that can carry headers. Response.redirect returns an immutable one. */
+function redirect(location: string, cookie?: string): Response {
+  const headers: Record<string, string> = { location };
+  if (cookie) headers['set-cookie'] = cookie;
+  return new Response(null, { status: 302, headers });
+}
 
 function html(body: string, status = 200): Response {
   return new Response(
@@ -167,42 +190,54 @@ const defaultHandler: ExportedHandler<Env> = {
       } catch (error) {
         if (!(error instanceof AuthorizationError)) throw error;
         if (!error.redirectUri) return html(`<p>${error.description}</p>`, 400);
-        const redirect = new URL(error.redirectUri);
-        redirect.searchParams.set('error', error.code);
-        redirect.searchParams.set('error_description', error.description);
-        if (error.state) redirect.searchParams.set('state', error.state);
-        if (error.issuer) redirect.searchParams.set('iss', error.issuer);
-        return Response.redirect(redirect.toString(), 302);
+        const back = new URL(error.redirectUri);
+        back.searchParams.set('error', error.code);
+        back.searchParams.set('error_description', error.description);
+        if (error.state) back.searchParams.set('state', error.state);
+        if (error.issuer) back.searchParams.set('iss', error.issuer);
+        return Response.redirect(back.toString(), 302);
       }
       const client = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
       if (!client) return html('<p>Unknown OAuth client.</p>', 400);
 
       // The request travels in the signed state parameter. Nothing is stored,
       // so nothing can fail to replicate before the person comes back.
-      const state = await signState(env.GOODWILL_STATE_KEY, authRequest, STATE_TTL_SECONDS);
+      const binding = newBinding();
+      const payload: StatePayload = { req: authRequest, bind: await bindingDigest(binding) };
+      const state = await signState(env.GOODWILL_STATE_KEY, payload, STATE_TTL_SECONDS);
 
       const to = new URL(SPLITWISE_AUTHORIZE);
       to.searchParams.set('response_type', 'code');
       to.searchParams.set('client_id', env.SPLITWISE_CLIENT_ID);
       to.searchParams.set('redirect_uri', `${url.origin}/callback`);
       to.searchParams.set('state', state);
-      return Response.redirect(to.toString(), 302);
+      return redirect(to.toString(), bindingCookie(binding, STATE_TTL_SECONDS));
     }
 
     if (url.pathname === '/callback') {
       const code = url.searchParams.get('code');
       const state = url.searchParams.get('state');
       if (!code || !state) return html('<p>Missing code or state.</p>', 400);
-      const verified = await verifyState<AuthRequest>(env.GOODWILL_STATE_KEY, state);
+      const verified = await verifyState<StatePayload>(env.GOODWILL_STATE_KEY, state);
       if (!verified.ok) return html(`<p>${STATE_MESSAGE[verified.reason]}</p>`, 400);
-      const authRequest = verified.payload;
+      const { req: authRequest, bind } = verified.payload;
+
+      // The state is self-contained, so signing it proves only that we issued
+      // it. The cookie proves this is the same browser that started the flow.
+      const binding = readCookie(request.headers.get('cookie'), STATE_COOKIE);
+      if (!binding || !bind || !safeEqual(await bindingDigest(binding), bind)) {
+        return html('<p>This sign-in was started in a different browser or the link was reused. Start again from your MCP client.</p>', 400);
+      }
+
       const client = await env.OAUTH_PROVIDER.lookupClient(authRequest.clientId);
       if (!client) return html('<p>Unknown OAuth client.</p>', 400);
 
       const splitwiseToken = await exchangeCode(env, code, `${url.origin}/callback`);
       const user = await currentUser(splitwiseToken);
       if (!allowed(env, user.email)) {
-        return html(`<h1>Not on the list</h1><p>${user.email} is not allowed to use this server. Ask the person who runs it, or revoke access at Splitwise &gt; Settings &gt; Apps.</p>`, 403);
+        const refused = html(`<h1>Not on the list</h1><p>${user.email} is not allowed to use this server. Ask the person who runs it, or revoke access at Splitwise &gt; Settings &gt; Apps.</p>`, 403);
+        refused.headers.set('set-cookie', bindingCookie('', 0));
+        return refused;
       }
 
       const scopes = grantedScopes(authRequest.scope);
@@ -214,7 +249,8 @@ const defaultHandler: ExportedHandler<Env> = {
         scope: scopes,
         props,
       });
-      return Response.redirect(redirectTo, 302);
+      // One use per browser: the binding is spent the moment it succeeds.
+      return redirect(redirectTo, bindingCookie('', 0));
     }
 
     return html('<p>Not found.</p>', 404);
