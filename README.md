@@ -113,6 +113,7 @@ npm run conformance      # official MCP conformance suite vs conformance-baselin
 npm run smoke:package    # packs, installs the tarball elsewhere, drives the installed binary
 npm run smoke:worker     # boots wrangler dev and checks the OAuth plumbing
 npm run build            # compile the publishable stdio server to dist/
+npm run doctor           # read-only check against YOUR real Splitwise account (needs SPLITWISE_API_KEY)
 ```
 
 ## Not affiliated with Splitwise
