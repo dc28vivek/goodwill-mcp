@@ -19,7 +19,8 @@
     "typecheck:worker": "tsc -p tsconfig.worker.json",
     "smoke:package": "tsx evals/package-smoke.ts",
     "doctor": "tsx evals/real-account.ts",
-    "sweep": "tsx evals/write-sweep.ts"
+    "sweep": "tsx evals/write-sweep.ts",
+    "lint": "oxlint --deny-warnings"
   },
   "keywords": [
     "mcp",
@@ -45,6 +46,7 @@
     "@modelcontextprotocol/client": "^2.0.0",
     "@modelcontextprotocol/node": "^2.0.0",
     "@types/node": "^26.6.2",
+    "oxlint": "^1.83.0",
     "tsx": "^4.23.13",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7",
@@ -57,7 +59,8 @@
   "files": [
     "dist",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "server.json"
   ],
   "engines": {
     "node": ">=20.6"

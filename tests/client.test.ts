@@ -6,7 +6,7 @@ function fakeFetch(responses: Array<{ status: number; body: unknown; headers?: R
   const fn = (async (input: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(input), init: init ?? {} });
     const next = responses.shift() ?? { status: 500, body: {} };
-    return new Response(JSON.stringify(next.body), { status: next.status, headers: { 'content-type': 'application/json', ...(next.headers ?? {}) } });
+    return new Response(JSON.stringify(next.body), { status: next.status, headers: { 'content-type': 'application/json', ...next.headers } });
   }) as typeof fetch;
   return { fn, calls };
 }
@@ -18,7 +18,7 @@ describe('SplitwiseClient', () => {
     const groups = await c.groups();
     expect(groups[0]?.name).toBe('Lisbon');
     expect(calls[0]?.url).toBe('https://secure.splitwise.com/api/v3.0/get_groups');
-    expect((calls[0]?.init.headers as Record<string, string>).Authorization).toBe('Bearer abc');
+    expect((calls[0]?.init.headers as Record<string, string> | undefined)?.Authorization).toBe('Bearer abc');
   });
   it('retries on 429 with backoff', async () => {
     const { fn, calls } = fakeFetch([

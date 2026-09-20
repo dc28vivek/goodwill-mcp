@@ -71,6 +71,11 @@ export interface BalanceExplanation {
  * This mirrors how Splitwise shows "you are owed X for Dinner" on an expense
  * card, so the explanation matches what the user sees in the app.
  */
+/** Total the amounts of a set of contributions. */
+function sum(list: Contribution[]): Minor {
+  return list.reduce((acc, c) => acc + c.amount, 0);
+}
+
 export function explainBalance(meId: number, counterpartyId: number, expenses: SwExpense[], since: SinceMode = 'last_settled'): BalanceExplanation[] {
   const byCurrency = new Map<string, Contribution[]>();
 
@@ -113,7 +118,7 @@ export function explainBalance(meId: number, counterpartyId: number, expenses: S
   }
 
   return [...byCurrency.entries()].map(([currency, all]) => {
-    const chronological = [...all].sort((a, b) => a.date.localeCompare(b.date));
+    const chronological = all.toSorted((a, b) => a.date.localeCompare(b.date));
 
     // Choose where the window opens. Everything before it is summarised as a
     // single brought-forward figure rather than replayed line by line.
@@ -146,23 +151,22 @@ export function explainBalance(meId: number, counterpartyId: number, expenses: S
     const broughtForward = closed.reduce((acc, c) => acc + c.amount, 0);
     const settledOn = cutAfter >= 0 ? chronological[cutAfter]!.date : null;
 
-    const expenses = open.filter((c) => c.kind === 'expense');
+    const charges = open.filter((c) => c.kind === 'expense');
     const payments = open.filter((c) => c.kind === 'payment');
-    const sum = (list: Contribution[]) => list.reduce((acc, c) => acc + c.amount, 0);
     return {
       meId,
       counterpartyId,
       currency,
       net: broughtForward + sum(open),
-      charged: sum(expenses),
+      charged: sum(charges),
       settled: sum(payments),
       broughtForward,
-      expenseCount: expenses.length,
+      expenseCount: charges.length,
       paymentCount: payments.length,
       settledOn,
       since: mode,
       closedCount: cutAfter + 1,
-      contributions: open.sort((a, b) => b.date.localeCompare(a.date)),
+      contributions: open.toSorted((a, b) => b.date.localeCompare(a.date)),
     };
   });
 }

@@ -49,9 +49,10 @@ describe('findDuplicateClusters', () => {
   });
 });
 
+const tx = (date: string, amount: string, description: string) => ({ date, amount, description, currency_code: 'EUR' });
+
 describe('findMissingExpenses', () => {
   const mine = LISBON_EXPENSES.filter((e) => !e.payment).map(toExpenseLike);
-  const tx = (date: string, amount: string, description: string) => ({ date, amount, description, currency_code: 'EUR' });
 
   it('reports a card charge that never made it into Splitwise', () => {
     const missing = findMissingExpenses([tx('2026-09-06T20:00:00Z', '42.00', 'BAR DA VELHA')], mine);

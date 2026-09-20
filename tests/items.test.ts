@@ -28,7 +28,7 @@ describe('splitByItems', () => {
   it('never loses a cent on an awkward shared line', () => {
     const { shares, total } = splitByItems([item('Nachos', '10.00', [1, 2, 3])]);
     expect([...shares.values()].reduce((a, b) => a + b, 0)).toBe(total);
-    expect([...shares.values()].sort()).toEqual([333, 333, 334]);
+    expect([...shares.values()].toSorted()).toEqual([333, 333, 334]);
   });
 
   it('shares always sum exactly to the total, with tax and tip', () => {

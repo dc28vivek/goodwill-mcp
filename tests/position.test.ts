@@ -24,7 +24,7 @@ describe('overallPosition', () => {
   });
   it('never mixes currencies', () => {
     const out = overallPosition([friend(2, 'Priya', [['EUR', '61.00'], ['INR', '-500.00']])]);
-    expect(out.map((o) => o.currency).sort()).toEqual(['EUR', 'INR']);
+    expect(out.map((o) => o.currency).toSorted()).toEqual(['EUR', 'INR']);
     expect(out.find((o) => o.currency === 'INR')?.iOwe).toBe(50000);
   });
   it('ignores settled friends', () => {

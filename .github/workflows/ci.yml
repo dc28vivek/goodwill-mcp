@@ -16,6 +16,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      - name: Lint
+        run: npm run lint
       - name: Typecheck (Node entry points)
         run: npm run typecheck
       - name: Typecheck (Cloudflare Worker)

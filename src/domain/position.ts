@@ -30,6 +30,11 @@ function fullName(f: { first_name: string; last_name: string | null }): string {
  * across all shared groups, so summing the friend balances gives the overall
  * picture without double counting. Currencies are never mixed.
  */
+/** Largest amount first, ties broken by id so the order is stable. */
+function biggestFirst(a: PersonPosition, b: PersonPosition): number {
+  return b.amount - a.amount || a.userId - b.userId;
+}
+
 export function overallPosition(friends: SwFriend[]): OverallPosition[] {
   const byCurrency = new Map<string, { owed: PersonPosition[]; owing: PersonPosition[] }>();
 
@@ -45,7 +50,6 @@ export function overallPosition(friends: SwFriend[]): OverallPosition[] {
     }
   }
 
-  const biggestFirst = (a: PersonPosition, b: PersonPosition) => b.amount - a.amount || a.userId - b.userId;
   return [...byCurrency.entries()]
     .map(([currency, { owed, owing }]) => {
       const owedToMe = owed.reduce((acc, p) => acc + p.amount, 0);
@@ -55,9 +59,9 @@ export function overallPosition(friends: SwFriend[]): OverallPosition[] {
         owedToMe,
         iOwe,
         net: owedToMe - iOwe,
-        owedToMeBy: owed.sort(biggestFirst),
-        iOweTo: owing.sort(biggestFirst),
+        owedToMeBy: owed.toSorted(biggestFirst),
+        iOweTo: owing.toSorted(biggestFirst),
       };
     })
-    .sort((a, b) => b.owedToMe + b.iOwe - (a.owedToMe + a.iOwe));
+    .toSorted((a, b) => b.owedToMe + b.iOwe - (a.owedToMe + a.iOwe));
 }

@@ -28,7 +28,7 @@ export function normalizeDescription(text: string): string {
     .replace(/[^\p{L}\p{N}\s]/gu, ' ')
     .split(/\s+/)
     .filter((t) => t && !STOP.has(t))
-    .sort()
+    .toSorted()
     .join(' ');
 }
 
@@ -108,7 +108,7 @@ export function findDuplicates(candidate: ExpenseLike, existing: ExpenseLike[], 
     const m = scoreDuplicate(candidate, e);
     if (m && m.confidence >= threshold) matches.push(m);
   }
-  return matches.sort((a, b) => b.confidence - a.confidence);
+  return matches.toSorted((a, b) => b.confidence - a.confidence);
 }
 
 /** Group a whole expense list into duplicate clusters. Each pair reported once. */
@@ -120,7 +120,7 @@ export function findDuplicateClusters(expenses: ExpenseLike[], threshold = 0.75)
       if (m && m.confidence >= threshold) out.push(m);
     }
   }
-  return out.sort((a, b) => b.confidence - a.confidence);
+  return out.toSorted((a, b) => b.confidence - a.confidence);
 }
 
 /** One line from a card or bank statement, as the model parsed it. */
@@ -156,7 +156,7 @@ export function findMissingExpenses(transactions: Transaction[], paidByMe: Expen
     const scored = paidByMe
       .map((e) => scoreDuplicate({ ...candidate, payerId: e.payerId }, e))
       .filter((m): m is DuplicateMatch => m !== null)
-      .sort((a, b) => b.confidence - a.confidence);
+      .toSorted((a, b) => b.confidence - a.confidence);
     if (scored.some((m) => m.confidence >= threshold)) continue;
     missing.push({
       transaction: t,

@@ -139,7 +139,7 @@ export function collapseTransient(activities: Activity[]): CollapsedActivity[] {
   const folded = new Map<number, CollapsedActivity>();
   const drop = new Set<number>();
   for (const [, group] of byExpense) {
-    const ordered = [...group].sort((a, b) => a.at.localeCompare(b.at));
+    const ordered = group.toSorted((a, b) => a.at.localeCompare(b.at));
     const last = ordered[ordered.length - 1]!;
     if (last.kind !== 'expense_deleted') continue;
     const added = ordered.find((a) => ADDED.has(a.kind));

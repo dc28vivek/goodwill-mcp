@@ -1,6 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
-import { type Transaction, findDuplicateClusters, findMissingExpenses, payerOf, toExpenseLike } from '../domain/dedupe.js';
+import { type ExpenseLike, type Transaction, findDuplicateClusters, findMissingExpenses, payerOf, toExpenseLike } from '../domain/dedupe.js';
 import type { SwExpense } from '../splitwise/types.js';
 import { KIND_LABELS, changeSummary, collapseTransient, toActivity } from '../domain/activity.js';
 import { type SinceMode, explainBalance } from '../domain/explain.js';
@@ -15,6 +15,48 @@ import type { SwUser } from '../splitwise/types.js';
 import { ActivityOutput, ExplainOutput, ListExpensesOutput, MissingOutput, OverallOutput, ReadExpenseOutput, ReconcileOutput, SettleOutput, StaleOutput, TransactionInput } from './schemas.js';
 
 const READ = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true } as const;
+
+// Shared row shape for list_expenses and read_expense.
+function expenseRow(e: SwExpense, meId: number) {
+  const mine = e.users.find((u) => u.user_id === meId);
+  const owed = mine ? toMinor(mine.owed_share) : 0;
+  const cost = toMinor(e.cost);
+  const payer = e.users.reduce<{ id: number; paid: number; name: string } | null>((best, u) => {
+    const paid = toMinor(u.paid_share);
+    return paid > 0 && (!best || paid > best.paid) ? { id: u.user_id, paid, name: fullName(u.user) } : best;
+  }, null);
+  return {
+    expense_id: e.id,
+    date: e.date.slice(0, 10),
+    description: untrusted(e.description, 120),
+    cost: fromMinor(cost),
+    currency: e.currency_code,
+    paid_by: payer ? payer.name : 'unknown',
+    paid_by_you: payer ? payer.id === meId : false,
+    your_share: fromMinor(owed),
+    share_percent: cost === 0 || e.payment ? null : Math.round((owed / cost) * 1000) / 10,
+    split_between: e.users.filter((u) => toMinor(u.owed_share) > 0).length,
+    category: untrusted(e.category?.name ?? '', 40),
+    comment_count: e.comments_count ?? 0,
+    is_payment: e.payment,
+  };
+}
+
+/** One duplicate-cluster member, trimmed for the result. */
+function brief(e: ExpenseLike) {
+  return {
+    expense_id: e.id ?? 0,
+    description: untrusted(e.description),
+    date: e.date.slice(0, 10),
+    amount: fromMinor(toMinor(e.cost)),
+    currency: e.currency_code,
+  };
+}
+
+/** "1 expense" / "2 expenses". */
+function plural(n: number, word: string): string {
+  return `${n} ${word}${n === 1 ? '' : 's'}`;
+}
 
 function direction(net: number): 'they_owe_you' | 'you_owe_them' | 'settled' {
   return net > 0 ? 'they_owe_you' : net < 0 ? 'you_owe_them' : 'settled';
@@ -121,26 +163,25 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       // A statement, not a net: charged, settled, left. That is the shape of the
       // question people actually ask.
       const lines = balances.map((b) => {
-        const who = b.counterparty.name;
+        const them = b.counterparty.name;
         const head =
           b.direction === 'they_owe_you'
-            ? `${who} owes you ${b.remaining} ${b.currency}`
+            ? `${them} owes you ${b.remaining} ${b.currency}`
             : b.direction === 'you_owe_them'
-              ? `You owe ${who} ${b.remaining} ${b.currency}`
-              : `You and ${who} are settled in ${b.currency}`;
+              ? `You owe ${them} ${b.remaining} ${b.currency}`
+              : `You and ${them} are settled in ${b.currency}`;
         if (b.direction === 'settled' && b.expense_count === 0) return head;
-        const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
         // Label by what actually happened. A payment does not always reduce a
         // debt: one with no expenses behind it creates the debt instead.
         const rows: [string, string, string][] = [];
         if (b.brought_raw !== 0) {
-          rows.push([b.brought_raw > 0 ? `${who} already owed` : 'You already owed', b.brought_forward, `carried forward from ${b.closed_count} earlier ${b.closed_count === 1 ? 'item' : 'items'}`]);
+          rows.push([b.brought_raw > 0 ? `${them} already owed` : 'You already owed', b.brought_forward, `carried forward from ${b.closed_count} earlier ${b.closed_count === 1 ? 'item' : 'items'}`]);
         }
         if (b.expense_count > 0) {
-          rows.push([b.charged_raw > 0 ? `${who} was charged` : 'You were charged', b.charged, `across ${plural(b.expense_count, 'expense')}`]);
+          rows.push([b.charged_raw > 0 ? `${them} was charged` : 'You were charged', b.charged, `across ${plural(b.expense_count, 'expense')}`]);
         }
         if (b.payment_count > 0) {
-          rows.push([b.settled_raw < 0 ? `${who} paid you` : `You paid ${who}`, b.settled, `in ${plural(b.payment_count, 'payment')}`]);
+          rows.push([b.settled_raw < 0 ? `${them} paid you` : `You paid ${them}`, b.settled, `in ${plural(b.payment_count, 'payment')}`]);
         }
         rows.push(['Left', b.remaining, '']);
         const labelWidth = Math.max(...rows.map(([label]) => label.length));
@@ -178,31 +219,6 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
     }),
   );
 
-  // Shared row shape for list_expenses and read_expense.
-  function expenseRow(e: SwExpense, meId: number) {
-    const mine = e.users.find((u) => u.user_id === meId);
-    const owed = mine ? toMinor(mine.owed_share) : 0;
-    const cost = toMinor(e.cost);
-    const payer = e.users.reduce<{ id: number; paid: number; name: string } | null>((best, u) => {
-      const paid = toMinor(u.paid_share);
-      return paid > 0 && (!best || paid > best.paid) ? { id: u.user_id, paid, name: fullName(u.user) } : best;
-    }, null);
-    return {
-      expense_id: e.id,
-      date: e.date.slice(0, 10),
-      description: untrusted(e.description, 120),
-      cost: fromMinor(cost),
-      currency: e.currency_code,
-      paid_by: payer ? payer.name : 'unknown',
-      paid_by_you: payer ? payer.id === meId : false,
-      your_share: fromMinor(owed),
-      share_percent: cost === 0 || e.payment ? null : Math.round((owed / cost) * 1000) / 10,
-      split_between: e.users.filter((u) => toMinor(u.owed_share) > 0).length,
-      category: untrusted(e.category?.name ?? '', 40),
-      comment_count: e.comments_count ?? 0,
-      is_payment: e.payment,
-    };
-  }
 
   server.registerTool(
     'list_expenses',
@@ -261,7 +277,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         .filter((e) => include_payments || !e.payment)
         .filter((e) => (friendId === undefined ? true : e.users.some((u) => u.user_id === friendId)))
         .filter((e) => (needle ? e.description.toLowerCase().includes(needle) : true))
-        .sort((a, b) => b.date.localeCompare(a.date));
+        .toSorted((a, b) => b.date.localeCompare(a.date));
 
       const expenses = matched.slice(0, limit).map((e) => expenseRow(e, me.id));
       const text = expenses.length
@@ -422,7 +438,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
             const near = (full.comments ?? [])
               .filter((c) => c.comment_type === 'System' && !c.deleted_at)
               .filter((c) => Math.abs(new Date(c.created_at).getTime() - new Date(e.at).getTime()) < 2 * 86_400_000)
-              .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+              .toSorted((a, b) => b.created_at.localeCompare(a.created_at))[0];
             const summary = near ? changeSummary(near.content) : null;
             if (summary) details.set(e.expense_id!, untrusted(summary, 160));
           } catch {
@@ -522,7 +538,7 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         currency_code: (t.currency ?? currency).toUpperCase(),
       }));
 
-      const dates = rows.map((r) => r.date).sort();
+      const dates = rows.map((r) => r.date).toSorted();
       const span = window_days * 86_400_000;
       const after = new Date(new Date(dates[0]!).getTime() - span).toISOString();
       const before = new Date(new Date(dates[dates.length - 1]!).getTime() + span).toISOString();
@@ -637,8 +653,8 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
         const sw = group.simplified_debts
           .filter((d) => d.currency_code === currency)
           .map((d) => `${d.from}>${d.to}:${toMinor(d.amount)}`)
-          .sort();
-        const ours = payments.map((p) => `${p.from}>${p.to}:${p.amount}`).sort();
+          .toSorted();
+        const ours = payments.map((p) => `${p.from}>${p.to}:${p.amount}`).toSorted();
         return {
           currency,
           payments: payments.map((p) => ({
@@ -700,7 +716,6 @@ export function registerReadTools(server: McpServer, deps: Deps): void {
       const clusters = findDuplicateClusters(expenses.map(toExpenseLike), threshold).map((m) => {
         // Keep the earlier one; the later post is the suspect.
         const [keep, suspect] = m.candidate.date <= m.existing.date ? [m.candidate, m.existing] : [m.existing, m.candidate];
-        const brief = (e: typeof keep) => ({ expense_id: e.id ?? 0, description: untrusted(e.description), date: e.date.slice(0, 10), amount: fromMinor(toMinor(e.cost)), currency: e.currency_code });
         return {
           confidence: m.confidence,
           reasons: m.reasons,

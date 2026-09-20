@@ -16,6 +16,11 @@ export interface Payment {
  * at most n-1 payments and matches what Splitwise's "simplify debts" shows in
  * the common cases. Ties are broken by user id so the output is deterministic.
  */
+/** Largest debt first, ties broken by id so the plan is deterministic. */
+function byAmtThenId(a: { id: number; amt: Minor }, b: { id: number; amt: Minor }): number {
+  return b.amt - a.amt || a.id - b.id;
+}
+
 export function settlePlan(positions: Map<number, Minor>): Payment[] {
   const debtors: { id: number; amt: Minor }[] = [];
   const creditors: { id: number; amt: Minor }[] = [];
@@ -27,7 +32,6 @@ export function settlePlan(positions: Map<number, Minor>): Payment[] {
   }
   if (sum !== 0) throw new RangeError(`Positions do not sum to zero (sum=${sum})`);
 
-  const byAmtThenId = (a: { id: number; amt: Minor }, b: { id: number; amt: Minor }) => b.amt - a.amt || a.id - b.id;
   debtors.sort(byAmtThenId);
   creditors.sort(byAmtThenId);
 

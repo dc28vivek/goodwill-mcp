@@ -1,0 +1,34 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.dc28vivek/goodwill",
+  "title": "Goodwill",
+  "description": "An unofficial Splitwise MCP server. Explain balances, settle up, split receipts by item, and add expenses in a sentence. Every write previews who it affects and waits; nothing is ever deleted.",
+  "version": "0.1.0",
+  "repository": {
+    "url": "https://github.com/dc28vivek/goodwill-mcp",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "goodwill-mcp",
+      "version": "0.1.0",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "SPLITWISE_API_KEY",
+          "description": "Your own Splitwise API key, from https://secure.splitwise.com/apps. It stays on your machine and is sent only to Splitwise.",
+          "isRequired": true,
+          "isSecret": true
+        },
+        {
+          "name": "GOODWILL_STATE_KEY",
+          "description": "Optional. A 32+ character secret used to sign the confirmation state passed between tool rounds. A random one is generated per process if unset, which is fine for a single local server.",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

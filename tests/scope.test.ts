@@ -11,7 +11,7 @@ describe('missingScope', () => {
     expect(missingScope(ctx, 'read')).toBeUndefined();
     const denied = missingScope(ctx, 'add');
     expect(denied?.isError).toBe(true);
-    expect((denied?.content[0] as { text: string }).text).toContain('"add" scope');
+    expect((denied?.content?.[0] as { text: string } | undefined)?.text).toContain('"add" scope');
   });
 
   it('refuses modify for a connection granted only the defaults', () => {
@@ -22,6 +22,6 @@ describe('missingScope', () => {
     expect(missingScope(ctx, 'add')).toBeUndefined();
     const denied = missingScope(ctx, 'modify');
     expect(denied?.isError).toBe(true);
-    expect((denied?.content[0] as { text: string }).text).toContain('"modify" scope');
+    expect((denied?.content?.[0] as { text: string } | undefined)?.text).toContain('"modify" scope');
   });
 });

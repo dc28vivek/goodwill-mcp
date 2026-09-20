@@ -100,7 +100,7 @@ SPLITWISE_API_KEY=your-key npm run dev:http     # http://127.0.0.1:3000/mcp
 2. `npx wrangler kv namespace create OAUTH_KV` and `npx wrangler kv namespace create GOODWILL_KV`; paste the ids into `wrangler.jsonc`.
 3. Secrets: `npx wrangler secret put SPLITWISE_CLIENT_ID`, `SPLITWISE_CLIENT_SECRET`, `GOODWILL_STATE_KEY` (32+ random characters).
 4. Set `ALLOWED_EMAILS` in `wrangler.jsonc`. Empty means nobody.
-5. `npm run deploy`, then add `https://<your-worker-host>/mcp` as a custom connector.
+5. `npm run deploy`, then add `https://<your-worker-host>/mcp` as a custom connector. Operating notes are in [RUNBOOK.md](RUNBOOK.md).
 
 A Splitwise access token never expires and has no scopes, so a hosted deployment holds permanent full account access for every user. Goodwill stores each token encrypted, decrypts it only while serving that person's own request, and adds `read`, `add` and `modify` scopes of its own because Splitwise has none. It is allowlisted by design. See [SECURITY.md](SECURITY.md).
 
@@ -115,6 +115,7 @@ only handed to a model for the ambiguous tail, so the behaviour is testable.
 ## Develop
 
 ```bash
+npm run lint             # oxlint
 npm test                 # unit + in-process integration tests (vitest)
 npm run typecheck        # Node entry points
 npm run typecheck:worker # Cloudflare Worker

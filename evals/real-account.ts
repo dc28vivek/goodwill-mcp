@@ -16,7 +16,7 @@ import { buildServer } from '../src/server/build.js';
 import { createDeps } from '../src/server/env.js';
 import { noopMetrics } from '../src/server/metrics.js';
 
-const READ_ONLY = [
+const READ_ONLY = new Set([
   'explain_balance',
   'list_expenses',
   'read_expense',
@@ -26,7 +26,7 @@ const READ_ONLY = [
   'stale_balances',
   'settle_plan',
   'find_duplicates',
-];
+]);
 
 const token = process.env.SPLITWISE_API_KEY;
 if (!token) {
@@ -48,7 +48,7 @@ async function main() {
 
   let failures = 0;
   const run = async (label: string, name: string, args: Record<string, unknown>) => {
-    if (!READ_ONLY.includes(name)) throw new Error(`refusing to call non-read tool ${name}`);
+    if (!READ_ONLY.has(name)) throw new Error(`refusing to call non-read tool ${name}`);
     const started = Date.now();
     try {
       const r = await client.callTool({ name, arguments: args });
@@ -91,7 +91,7 @@ async function main() {
   const pick = process.argv[2];
   const target = pick
     ? real.find((g) => String(g.id) === pick || g.name.toLowerCase().includes(pick.toLowerCase()))
-    : [...real].sort((a, b) => b.members.length - a.members.length || b.updated_at.localeCompare(a.updated_at))[0];
+    : real.toSorted((a, b) => b.members.length - a.members.length || b.updated_at.localeCompare(a.updated_at))[0];
   if (pick && !target) {
     console.log(`\nNo group matching "${pick}".`);
   }

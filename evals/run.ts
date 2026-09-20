@@ -102,7 +102,7 @@ async function main() {
   // Product metrics from this run, the same events the server emits in production.
   const count = (t: MetricEvent['type']) => allEvents.filter((e) => e.type === t).length;
   const calls = allEvents.filter((e): e is Extract<MetricEvent, { type: 'tool_call' }> => e.type === 'tool_call');
-  const p50 = [...calls.map((c) => c.ms)].sort((a, b) => a - b)[Math.floor(calls.length / 2)] ?? 0;
+  const p50 = calls.map((c) => c.ms).toSorted((a, b) => a - b)[Math.floor(calls.length / 2)] ?? 0;
   const shown = count('preview_shown');
   console.log('\nmetrics');
   console.log(`  tool calls            ${calls.length} (p50 ${p50} ms, ${calls.filter((c) => !c.ok).length} error results)`);

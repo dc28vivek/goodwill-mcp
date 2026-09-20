@@ -59,5 +59,5 @@ export function staleBalances(
       });
     }
   }
-  return out.sort((a, b) => b.ageDays - a.ageDays);
+  return out.toSorted((a, b) => b.ageDays - a.ageDays);
 }

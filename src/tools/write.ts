@@ -5,7 +5,7 @@ import { ReceiptMismatch, splitByItems } from '../domain/items.js';
 import { fromMinor, rescaleShares, splitEqual, toMinor } from '../domain/money.js';
 import { parseExpenseSentence } from '../domain/parser.js';
 import type { Deps, PendingWrite } from '../server/deps.js';
-import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, sentenceCase, timed, untrusted } from '../server/format.js';
+import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, timed, untrusted } from '../server/format.js';
 import { type Invitee, describeResolution, resolveInvitee, resolveMember } from '../server/resolve.js';
 import type { SwAddUserToGroup, SwCreateExpenseByShares, SwCreateGroup, SwExpense, SwUser } from '../splitwise/types.js';
 import { AddExpenseOutput, AddMembersOutput, ConfirmSchema, GroupOutput, ItemSplitOutput, ReceiptItemInput, SettleOutputWrite, UpdateExpenseOutput } from './schemas.js';
@@ -397,7 +397,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
 
       if (changes.length === 0) return ok('Nothing to change; the expense already has those values.', { updated: false, expense_id: args.expense_id, note: 'No difference between the current and requested values.' });
 
-      const fp = `update|${args.expense_id}|${changes.map((c) => `${c.field}=${c.to}`).sort().join(',')}`;
+      const fp = `update|${args.expense_id}|${changes.map((c) => `${c.field}=${c.to}`).toSorted().join(',')}`;
       const already = await deps.writeLog.find(String(me.id), fp, args.idempotency_key);
       if (already) {
         deps.metrics.emit({ type: 'duplicate_blocked', tool: 'update_expense', source: 'write_log' });
@@ -515,7 +515,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         i += 1;
       }
 
-      const fp = `group|${me.id}|${name.toLowerCase()}|${members.map((m) => m.name).sort().join(',')}`;
+      const fp = `group|${me.id}|${name.toLowerCase()}|${members.map((m) => m.name).toSorted().join(',')}`;
       const already = await deps.writeLog.find(String(me.id), fp, args.idempotency_key);
       if (already) {
         deps.metrics.emit({ type: 'duplicate_blocked', tool: 'create_group', source: 'write_log' });
@@ -652,7 +652,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
 
       deps.metrics.emit({ type: 'preview_shown', tool: 'add_to_group' });
       const payload: AddMembersPayload = { groupId: group.id, groupName: untrusted(group.name, 60), additions };
-      const state = await deps.codec.mint({ kind: 'add_to_group', userId: me.id, fingerprint: `addto|${group.id}|${additions.map((a) => a.name).sort().join(',')}`, payload });
+      const state = await deps.codec.mint({ kind: 'add_to_group', userId: me.id, fingerprint: `addto|${group.id}|${additions.map((a) => a.name).toSorted().join(',')}`, payload });
       return inputRequired({
         inputRequests: { confirm: inputRequired.elicit({ message: `${lines.join('\n')}\n\nAdd them?`, requestedSchema: ConfirmSchema }) },
         requestState: state,
@@ -794,7 +794,7 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
       }
 
       const breakdown = [...split.shares.entries()]
-        .sort((a, b) => b[1] - a[1])
+        .toSorted((a, b) => b[1] - a[1])
         .map(([id, owes]) => ({
           person: { id, name: fullName(byId.get(id)) },
           items: fromMinor(split.subtotals.get(id) ?? 0),

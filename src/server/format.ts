@@ -7,6 +7,8 @@ import type { CallToolResult } from '@modelcontextprotocol/server';
  */
 export function untrusted(text: string | null | undefined, max = 200): string {
   if (!text) return '';
+  // Stripping control characters is the point here, so the rule is muted.
+  // eslint-disable-next-line no-control-regex
   const cleaned = text.replace(/[\x00-\x1f\x7f]/g, ' ').replace(/\s+/g, ' ').trim();
   return cleaned.length > max ? `${cleaned.slice(0, max - 3)}...` : cleaned;
 }
