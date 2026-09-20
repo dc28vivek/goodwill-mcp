@@ -100,7 +100,11 @@ export class SplitwiseClient {
 
   constructor(opts: SplitwiseClientOptions) {
     this.token = opts.token;
-    this.fetchImpl = opts.fetch ?? fetch;
+    // Bound on purpose. Calling `this.fetchImpl(...)` passes this client as
+    // `this`, and workerd rejects that with "Illegal invocation": its global
+    // functions check their receiver. Node's fetch does not, so nothing in the
+    // test suite can see the difference. See the build log.
+    this.fetchImpl = opts.fetch ?? fetch.bind(globalThis);
     this.retries = opts.retries ?? 3;
     this.backoffMs = opts.backoffMs ?? 500;
     this.baseUrl = opts.baseUrl ?? SPLITWISE_API;

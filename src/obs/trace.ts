@@ -272,7 +272,7 @@ export class OtlpTracer implements Tracer, Recorder {
     // An unsampled trace is still exported when something went wrong, because
     // the failures are the traces anybody actually opens.
     if (!this.sampled && !ready.some((s) => s.error)) return;
-    const send = this.opts.fetch ?? fetch;
+    const send = this.opts.fetch ?? fetch.bind(globalThis);
     try {
       await send(this.url, {
         method: 'POST',

@@ -5,7 +5,7 @@
   "compatibility_date": "2026-09-01",
   "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
   "kv_namespaces": [
-    { "binding": "OAUTH_KV", "id": "REPLACE_WITH_OAUTH_KV_ID" }
+    { "binding": "OAUTH_KV", "id": "8b00715838a44a2aaa1efc23d7da10c5" }
   ],
   // One object per Splitwise user. Holds the write-log reservation and the
   // upstream budget, the two pieces of state that must be strongly consistent.
@@ -17,9 +17,12 @@
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["UserState"] }
   ],
+  // ALLOWED_EMAILS is a secret, not a var: it is a list of real people's email
+  // addresses and this repository is public. Set it with
+  // `wrangler secret put ALLOWED_EMAILS`. The code reads env.ALLOWED_EMAILS
+  // either way. Keeping it here would also clobber the secret on every deploy.
   "vars": {
-    "ALLOWED_EMAILS": "",
-    "PUBLIC_HOST": "",
+    "PUBLIC_HOST": "goodwill-mcp.dc28vivek.workers.dev",
     "ENVIRONMENT": "production",
     // Leave the endpoint empty to run without tracing. Any OTLP/HTTP collector
     // works: Honeycomb, Grafana Cloud, Baselime, a self-hosted collector.
