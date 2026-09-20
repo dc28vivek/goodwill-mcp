@@ -75,8 +75,15 @@ async function main() {
   await run('overall_balances', 'overall_balances', {});
   await run('stale_balances (30 days)', 'stale_balances', { older_than_days: 30 });
 
-  // Busiest group by member count, then by most recent activity.
-  const target = [...real].sort((a, b) => b.members.length - a.members.length || b.updated_at.localeCompare(a.updated_at))[0];
+  // A group id or name fragment can be passed: `npm run doctor -- 34196144`.
+  // Otherwise the busiest group by member count, then by most recent activity.
+  const pick = process.argv[2];
+  const target = pick
+    ? real.find((g) => String(g.id) === pick || g.name.toLowerCase().includes(pick.toLowerCase()))
+    : [...real].sort((a, b) => b.members.length - a.members.length || b.updated_at.localeCompare(a.updated_at))[0];
+  if (pick && !target) {
+    console.log(`\nNo group matching "${pick}".`);
+  }
   if (target) {
     console.log(`\n--- drilling into "${target.name}" (id ${target.id}) ---`);
     await run(`explain_balance (whole group)`, 'explain_balance', { group_id: target.id });
