@@ -32,7 +32,7 @@ describe('goodwill server', () => {
   it('lists six tools with honest annotations and fixed order', async () => {
     const { client } = await connect(state);
     const { tools } = await client.listTools();
-    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'nudge']);
+    expect(tools.map((t) => t.name)).toEqual(['explain_balance', 'overall_balances', 'find_missing_expenses', 'stale_balances', 'settle_plan', 'find_duplicates', 'add_expense', 'split_by_items', 'settle_up', 'nudge']);
     const byName = Object.fromEntries(tools.map((t) => [t.name, t]));
     expect(byName.explain_balance?.annotations?.readOnlyHint).toBe(true);
     expect(byName.add_expense?.annotations?.readOnlyHint).toBe(false);
@@ -205,5 +205,86 @@ describe('goodwill server', () => {
     });
     expect((r.structuredContent as { missing: unknown[] }).missing).toEqual([]);
     expect(String((r.content[0] as { text: string }).text)).toContain('already in Splitwise');
+  });
+
+  it('records a settlement for the full outstanding balance', async () => {
+    const { client, prompts } = await connect(state, true);
+    const r = await client.callTool({ name: 'settle_up', arguments: { friend: 'Priya', group_id: 100 } });
+    expect(prompts[0]).toContain('Priya S paid you 61.00 EUR');
+    expect(prompts[0]).toContain('This closes the balance with Priya S');
+    const sc = r.structuredContent as { recorded: boolean; amount: string };
+    expect(sc).toMatchObject({ recorded: true, amount: '61.00' });
+    const body = state.writes.find((w) => w.path === '/create_expense')?.body as Record<string, unknown>;
+    expect(body.payment).toBe(true);
+    expect(body.cost).toBe('61.00');
+  });
+
+  it('records a partial settlement and says what is left', async () => {
+    const { client, prompts } = await connect(state, true);
+    await client.callTool({ name: 'settle_up', arguments: { friend: 'Priya', group_id: 100, amount: '20.00', direction: 'they_paid' } });
+    expect(prompts[0]).toContain('41.00 EUR would still be open');
+  });
+
+  it('refuses to settle with someone who owes nothing', async () => {
+    const { client } = await connect(state, true);
+    const r = await client.callTool({ name: 'settle_up', arguments: { friend: 'Alex Brown', group_id: 100 } });
+    expect(r.isError).toBe(true);
+    expect((r.content[0] as { text: string }).text).toContain('nothing outstanding');
+  });
+
+  it('splits a receipt by item, allocating tax and tip proportionally', async () => {
+    const { client, prompts } = await connect(state, true);
+    const r = await client.callTool({
+      name: 'split_by_items',
+      arguments: {
+        group_id: 100,
+        description: 'Dinner at Ramiro',
+        currency: 'EUR',
+        items: [
+          { description: 'Steak', amount: '30.00', shared_by: ['me'] },
+          { description: 'Salad', amount: '10.00', shared_by: ['Priya'] },
+        ],
+        tax: '3.00',
+        tip: '5.00',
+        total: '48.00',
+      },
+    });
+    expect(prompts[0]).toContain('split by item');
+    expect(prompts[0]).toContain('Vivek D: 36.00 EUR');
+    expect(prompts[0]).toContain('Priya S: 12.00 EUR');
+    const sc = r.structuredContent as { posted: boolean; total: string; breakdown: { person: { name: string }; owes: string }[] };
+    expect(sc).toMatchObject({ posted: true, total: '48.00' });
+    const body = state.writes.find((w) => w.path === '/create_expense')?.body as Record<string, string | number>;
+    expect(body.cost).toBe('48.00');
+    expect(Number(body.users__0__owed_share) + Number(body.users__1__owed_share)).toBeCloseTo(48, 2);
+  });
+
+  it('refuses a receipt whose lines do not add up, before posting anything', async () => {
+    const { client } = await connect(state, true);
+    const r = await client.callTool({
+      name: 'split_by_items',
+      arguments: {
+        group_id: 100,
+        description: 'Misread receipt',
+        currency: 'EUR',
+        items: [{ description: 'Steak', amount: '30.00', shared_by: ['me'] }],
+        tax: '3.00',
+        total: '40.00',
+      },
+    });
+    expect(r.isError).toBe(true);
+    expect((r.content[0] as { text: string }).text).toContain('do not add up');
+    expect(state.writes).toHaveLength(0);
+  });
+
+  it('rejects an unknown name on a receipt line before doing any maths', async () => {
+    const { client } = await connect(state, true);
+    const r = await client.callTool({
+      name: 'split_by_items',
+      arguments: { group_id: 100, description: 'Lunch', currency: 'EUR', items: [{ description: 'Soup', amount: '9.00', shared_by: ['Zed'] }] },
+    });
+    expect(r.isError).toBe(true);
+    expect((r.content[0] as { text: string }).text).toContain('not a member');
+    expect(state.writes).toHaveLength(0);
   });
 });

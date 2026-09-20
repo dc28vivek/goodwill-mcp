@@ -1,13 +1,14 @@
 import { type McpServer, acceptedContent, inputRequired, inputResponse } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { type ExpenseLike, findDuplicates, fingerprint, toExpenseLike } from '../domain/dedupe.js';
+import { ReceiptMismatch, splitByItems } from '../domain/items.js';
 import { fromMinor, splitEqual, toMinor } from '../domain/money.js';
 import { parseExpenseSentence } from '../domain/parser.js';
 import type { Deps, PendingWrite } from '../server/deps.js';
 import { GROUP_URL, fail, fullName, joinNames, missingScope, ok, timed, untrusted } from '../server/format.js';
 import { describeResolution, resolveMember } from '../server/resolve.js';
 import type { SwCreateExpenseByShares, SwExpense, SwUser } from '../splitwise/types.js';
-import { AddExpenseOutput, ConfirmSchema, NudgeOutput } from './schemas.js';
+import { AddExpenseOutput, ConfirmSchema, ItemSplitOutput, NudgeOutput, ReceiptItemInput, SettleOutputWrite } from './schemas.js';
 
 const WRITE = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true } as const;
 
@@ -24,6 +25,22 @@ interface NudgePayload {
   expenseId: number;
   content: string;
   toName: string;
+}
+
+interface SettlePayload {
+  body: SwCreateExpenseByShares;
+  fromName: string;
+  toName: string;
+  amount: string;
+  currency: string;
+}
+
+interface ItemSplitPayload {
+  body: SwCreateExpenseByShares;
+  description: string;
+  total: string;
+  currency: string;
+  breakdown: { person: { id: number; name: string }; items: string; extras: string; owes: string }[];
 }
 
 /** Was the confirmation declined or cancelled (as opposed to missing)? */
@@ -207,6 +224,356 @@ export function registerWriteTools(server: McpServer, deps: Deps): void {
         inputRequests: {
           confirm: inputRequired.elicit({ message: `${preview} Post it?`, requestedSchema: ConfirmSchema }),
         },
+        requestState: state,
+      });
+    }),
+  );
+
+  server.registerTool(
+    'split_by_items',
+    {
+      title: 'Split a receipt by item',
+      description:
+        'Split a bill line by line instead of equally, so everyone pays for what they ordered. Read the receipt yourself (from a photo, a PDF or text the user pasted) and pass the lines in as `items`, each with who shares it. Tax and tip are allocated in proportion to what each person ordered, not split equally. Pass `total` from the receipt and the tool will refuse to post if the lines do not add up, which catches a misread photo before it becomes five wrong balances. Shows a preview and waits for confirmation.',
+      inputSchema: z.object({
+        group_id: z.number().int(),
+        description: z.string().max(120).describe('What the bill was, e.g. "Dinner at Cervejaria".'),
+        items: z.array(ReceiptItemInput).min(1).max(100),
+        tax: z.string().optional().describe('Tax as printed. Allocated in proportion to each person\'s items.'),
+        tip: z.string().optional().describe('Tip as printed. Allocated the same way.'),
+        total: z.string().optional().describe('The printed grand total. Strongly recommended: it is the check that the receipt was read correctly.'),
+        currency: z.string().length(3).optional(),
+        payer: z.string().optional().describe('"me" or a member name or id. Defaults to me.'),
+        date: z.string().optional().describe('YYYY-MM-DD. Defaults to today.'),
+        category_id: z.number().int().optional(),
+        idempotency_key: z.string().max(64).optional(),
+      }),
+      outputSchema: ItemSplitOutput,
+      annotations: WRITE,
+    },
+    timed(deps.metrics, 'split_by_items', async (args, ctx) => {
+      const denied = missingScope(ctx, 'add');
+      if (denied) return denied;
+      const me = await deps.me();
+      const pending = ctx.mcpReq.requestState<PendingWrite>();
+
+      if (pending && pending.kind === 'split_by_items') {
+        if (pending.userId !== me.id) return fail('This confirmation belongs to a different Splitwise account. Start again.');
+        const payload = pending.payload as ItemSplitPayload;
+        const answer = acceptedContent(ctx.mcpReq.inputResponses, 'confirm', ConfirmSchema);
+        if (!answer || answer.confirm !== true || declined(ctx.mcpReq.inputResponses)) {
+          deps.metrics.emit({ type: 'preview_declined', tool: 'split_by_items' });
+          return ok('Cancelled. Nothing was posted.', { posted: false, group_id: args.group_id, note: 'Cancelled by the user.' });
+        }
+        deps.metrics.emit({ type: 'preview_confirmed', tool: 'split_by_items' });
+        const existing = await deps.writeLog.find(String(me.id), pending.fingerprint, pending.idempotencyKey);
+        if (existing) {
+          deps.metrics.emit({ type: 'duplicate_blocked', tool: 'split_by_items', source: 'write_log' });
+          return ok(`Already posted as expense #${existing.expenseId}. Nothing new was created.`, {
+            posted: false,
+            expense_id: existing.expenseId,
+            group_id: args.group_id,
+            note: 'A matching expense was posted in the last 48 hours. Refused to post again.',
+          });
+        }
+        const created = await deps.client.createExpense(payload.body);
+        deps.metrics.emit({ type: 'write_posted', tool: 'split_by_items' });
+        await deps.writeLog.record(String(me.id), {
+          fingerprint: pending.fingerprint,
+          ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
+          expenseId: created.id,
+          createdAt: deps.now().toISOString(),
+          description: payload.description,
+        });
+        return ok(`Posted "${payload.description}" ${payload.total} ${payload.currency} as expense #${created.id}, split by item. ${GROUP_URL(args.group_id)}`, {
+          posted: true,
+          expense_id: created.id,
+          group_id: args.group_id,
+          total: payload.total,
+          currency: payload.currency,
+          breakdown: payload.breakdown,
+          note: 'Posted. Everyone in the split can see it in Splitwise.',
+        });
+      }
+
+      // Round 1.
+      const group = await deps.group(args.group_id);
+      const currency = (args.currency ?? me.default_currency ?? 'USD').toUpperCase();
+      const description = untrusted(args.description, 120);
+      const date = args.date ?? localDate(deps.now());
+
+      const payerRes = resolveMember(group, args.payer ?? 'me', me.id);
+      if (!payerRes.ok) return fail(describeResolution(args.payer ?? 'me', payerRes));
+      const payer = payerRes.user;
+
+      // Resolve every name on every line, so a typo fails before any maths.
+      const byId = new Map<number, SwUser>();
+      const lines = [];
+      for (const item of args.items) {
+        const ids: number[] = [];
+        for (const ref of item.shared_by) {
+          if (/^(everyone|everybody|all|the group)$/i.test(ref.trim())) {
+            for (const m of group.members) {
+              byId.set(m.id, m);
+              ids.push(m.id);
+            }
+            continue;
+          }
+          const r = resolveMember(group, ref, me.id);
+          if (!r.ok) return fail(`On line "${untrusted(item.description, 60)}": ${describeResolution(ref, r)}`);
+          byId.set(r.user.id, r.user);
+          ids.push(r.user.id);
+        }
+        lines.push({ description: untrusted(item.description, 120), amount: item.amount, sharedBy: ids });
+      }
+
+      let split;
+      try {
+        split = splitByItems(lines, {
+          ...(args.tax !== undefined ? { tax: args.tax } : {}),
+          ...(args.tip !== undefined ? { tip: args.tip } : {}),
+          ...(args.total !== undefined ? { statedTotal: args.total } : {}),
+        });
+      } catch (err) {
+        if (err instanceof ReceiptMismatch) {
+          return fail(
+            `The lines do not add up to the printed total. Items come to ${fromMinor(err.itemsTotal)}, plus ${fromMinor(err.extras)} tax and tip, which is ${fromMinor(err.itemsTotal + err.extras)} ${currency}, but the receipt says ${fromMinor(err.stated)} ${currency}. Re-read the receipt and check for a missed line or a misread digit. Nothing was posted.`,
+          );
+        }
+        return fail(`${(err as Error).message}. Nothing was posted.`);
+      }
+
+      byId.set(payer.id, payer);
+      const body: SwCreateExpenseByShares = {
+        cost: fromMinor(split.total),
+        description,
+        group_id: group.id,
+        currency_code: currency,
+        date: `${date}T12:00:00Z`,
+        ...(args.category_id !== undefined ? { category_id: args.category_id } : {}),
+      };
+      const participants = new Set<number>([...split.shares.keys(), payer.id]);
+      let i = 0;
+      for (const id of participants) {
+        body[`users__${i}__user_id`] = id;
+        body[`users__${i}__paid_share`] = id === payer.id ? fromMinor(split.total) : '0.00';
+        body[`users__${i}__owed_share`] = fromMinor(split.shares.get(id) ?? 0);
+        i += 1;
+      }
+
+      const breakdown = [...split.shares.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([id, owes]) => ({
+          person: { id, name: fullName(byId.get(id)) },
+          items: fromMinor(split.subtotals.get(id) ?? 0),
+          extras: fromMinor(owes - (split.subtotals.get(id) ?? 0)),
+          owes: fromMinor(owes),
+        }));
+
+      const candidate: ExpenseLike = { description, cost: fromMinor(split.total), currency_code: currency, date: `${date}T12:00:00Z`, payerId: payer.id };
+      const fp = fingerprint(group.id, candidate);
+      const already = await deps.writeLog.find(String(me.id), fp, args.idempotency_key);
+      if (already) {
+        deps.metrics.emit({ type: 'duplicate_blocked', tool: 'split_by_items', source: 'write_log' });
+        return ok(`Already posted as expense #${already.expenseId} within the last 48 hours. Nothing new was created.`, {
+          posted: false,
+          expense_id: already.expenseId,
+          group_id: group.id,
+          note: 'Duplicate of a recent post from this connector. Refused.',
+        });
+      }
+
+      const extrasNote = split.tax || split.tip ? ` Tax and tip of ${fromMinor(split.tax + split.tip)} ${currency} split in proportion to what each person ordered.` : '';
+      const rows = breakdown.map((b) => `  ${b.person.name}: ${b.owes} ${currency} (${b.items} of items${split.tax || split.tip ? ` + ${b.extras} extras` : ''})`);
+      const affected = breakdown.filter((b) => b.person.id !== me.id).map((b) => b.person.name);
+      const preview = [
+        `Add "${description}" for ${fromMinor(split.total)} ${currency} to ${untrusted(group.name, 60)} on ${date}, split by item. ${fullName(payer)} paid.${extrasNote}`,
+        ...rows,
+        affected.length ? `This changes what ${joinNames(affected)} owe.` : '',
+      ]
+        .filter(Boolean)
+        .join('\n');
+
+      deps.metrics.emit({ type: 'preview_shown', tool: 'split_by_items' });
+      const payload: ItemSplitPayload = { body, description, total: fromMinor(split.total), currency, breakdown };
+      const state = await deps.codec.mint({
+        kind: 'split_by_items',
+        userId: me.id,
+        fingerprint: fp,
+        ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
+        payload,
+      });
+      return inputRequired({
+        inputRequests: { confirm: inputRequired.elicit({ message: `${preview}\n\nPost it?`, requestedSchema: ConfirmSchema }) },
+        requestState: state,
+      });
+    }),
+  );
+
+  server.registerTool(
+    'settle_up',
+    {
+      title: 'Record a payment',
+      description:
+        'Record that money changed hands, so the balance closes in Splitwise. Use this after you actually paid someone (or they paid you) through Venmo, UPI, a bank transfer or cash. Defaults to the full outstanding balance. Shows a preview and waits for confirmation. This does not move money; it records a payment that already happened.',
+      inputSchema: z.object({
+        friend: z.string().describe('Member name or id.'),
+        amount: z.string().optional().describe('Decimal string like "61.00". Defaults to the full outstanding balance with this person.'),
+        currency: z.string().length(3).optional(),
+        direction: z.enum(['i_paid', 'they_paid']).default('i_paid').describe('Who handed over the money.'),
+        group_id: z.number().int().optional().describe('Record it inside a group. Otherwise it is a direct payment.'),
+        date: z.string().optional().describe('YYYY-MM-DD. Defaults to today.'),
+        idempotency_key: z.string().max(64).optional(),
+      }),
+      outputSchema: SettleOutputWrite,
+      annotations: WRITE,
+    },
+    timed(deps.metrics, 'settle_up', async (args, ctx) => {
+      const denied = missingScope(ctx, 'add');
+      if (denied) return denied;
+      const me = await deps.me();
+      const pending = ctx.mcpReq.requestState<PendingWrite>();
+
+      if (pending && pending.kind === 'settle_up') {
+        if (pending.userId !== me.id) return fail('This confirmation belongs to a different Splitwise account. Start again.');
+        const payload = pending.payload as SettlePayload;
+        const answer = acceptedContent(ctx.mcpReq.inputResponses, 'confirm', ConfirmSchema);
+        if (!answer || answer.confirm !== true || declined(ctx.mcpReq.inputResponses)) {
+          deps.metrics.emit({ type: 'preview_declined', tool: 'settle_up' });
+          return ok('Cancelled. No payment was recorded.', { recorded: false, note: 'Cancelled by the user.' });
+        }
+        deps.metrics.emit({ type: 'preview_confirmed', tool: 'settle_up' });
+        const existing = await deps.writeLog.find(String(me.id), pending.fingerprint, pending.idempotencyKey);
+        if (existing) {
+          deps.metrics.emit({ type: 'duplicate_blocked', tool: 'settle_up', source: 'write_log' });
+          return ok(`Already recorded as #${existing.expenseId}. Nothing new was created.`, {
+            recorded: false,
+            expense_id: existing.expenseId,
+            note: 'A matching payment was recorded in the last 48 hours. Refused to record it again.',
+          });
+        }
+        const created = await deps.client.createExpense(payload.body);
+        deps.metrics.emit({ type: 'write_posted', tool: 'settle_up' });
+        await deps.writeLog.record(String(me.id), {
+          fingerprint: pending.fingerprint,
+          ...(pending.idempotencyKey ? { idempotencyKey: pending.idempotencyKey } : {}),
+          expenseId: created.id,
+          createdAt: deps.now().toISOString(),
+          description: `Payment ${payload.amount} ${payload.currency}`,
+        });
+        return ok(`Recorded: ${payload.fromName} paid ${payload.toName} ${payload.amount} ${payload.currency}. Balance updated.`, {
+          recorded: true,
+          expense_id: created.id,
+          from: payload.fromName,
+          to: payload.toName,
+          amount: payload.amount,
+          currency: payload.currency,
+          note: 'Recorded as a payment in Splitwise.',
+        });
+      }
+
+      // Round 1.
+      let target: SwUser;
+      let outstanding = 0;
+      let currency = (args.currency ?? me.default_currency ?? 'USD').toUpperCase();
+      const friends = await deps.client.friends();
+
+      if (args.group_id !== undefined) {
+        const group = await deps.group(args.group_id);
+        const r = resolveMember(group, args.friend, me.id);
+        if (!r.ok) return fail(describeResolution(args.friend, r));
+        target = r.user;
+        const bal = friends.find((f) => f.id === target.id)?.groups.find((g) => g.group_id === args.group_id)?.balance ?? [];
+        const picked = bal.find((b) => (args.currency ? b.currency_code === currency : toMinor(b.amount) !== 0));
+        if (picked) {
+          outstanding = toMinor(picked.amount);
+          currency = picked.currency_code;
+        }
+      } else {
+        const r = resolveMember({ members: friends.map((f) => ({ ...f })) }, args.friend, me.id);
+        if (!r.ok) return fail(describeResolution(args.friend, r));
+        target = r.user;
+        const bal = friends.find((f) => f.id === target.id)?.balance ?? [];
+        const picked = bal.find((b) => (args.currency ? b.currency_code === currency : toMinor(b.amount) !== 0));
+        if (picked) {
+          outstanding = toMinor(picked.amount);
+          currency = picked.currency_code;
+        }
+      }
+
+      // `outstanding` is positive when they owe me.
+      const owedToMe = outstanding > 0;
+      const defaultDirection = owedToMe ? 'they_paid' : 'i_paid';
+      const direction = args.amount === undefined ? defaultDirection : args.direction;
+
+      let amountMinor: number;
+      if (args.amount !== undefined) {
+        try {
+          amountMinor = toMinor(args.amount);
+        } catch {
+          return fail(`"${args.amount}" is not an amount. Use a decimal like "61.00".`);
+        }
+      } else {
+        amountMinor = Math.abs(outstanding);
+      }
+      if (amountMinor <= 0) return fail(`There is nothing outstanding with ${fullName(target)}. Give an explicit amount if you want to record a payment anyway.`);
+
+      const payer = direction === 'i_paid' ? me : target;
+      const receiver = direction === 'i_paid' ? target : me;
+      const date = args.date ?? localDate(deps.now());
+      const body: SwCreateExpenseByShares = {
+        cost: fromMinor(amountMinor),
+        description: 'Payment',
+        group_id: args.group_id ?? 0,
+        currency_code: currency,
+        date: `${date}T12:00:00Z`,
+        // `payment` is not in the documented create_expense schema, but the
+        // shares below produce the correct balance either way: the payer is
+        // credited the full amount and the receiver owes it.
+        payment: true,
+        users__0__user_id: payer.id,
+        users__0__paid_share: fromMinor(amountMinor),
+        users__0__owed_share: '0.00',
+        users__1__user_id: receiver.id,
+        users__1__paid_share: '0.00',
+        users__1__owed_share: fromMinor(amountMinor),
+      };
+
+      const fp = `settle|${args.group_id ?? 0}|${payer.id}|${receiver.id}|${currency}|${amountMinor}|${date}`;
+      const already = await deps.writeLog.find(String(me.id), fp, args.idempotency_key);
+      if (already) {
+        deps.metrics.emit({ type: 'duplicate_blocked', tool: 'settle_up', source: 'write_log' });
+        return ok(`Already recorded as #${already.expenseId} within the last 48 hours. Nothing new was created.`, {
+          recorded: false,
+          expense_id: already.expenseId,
+          note: 'Duplicate of a recent payment recorded by this connector. Refused.',
+        });
+      }
+
+      const fromName = payer.id === me.id ? 'You' : fullName(payer);
+      const toName = receiver.id === me.id ? 'you' : fullName(receiver);
+      const remaining = Math.abs(outstanding) - amountMinor;
+      const after =
+        outstanding === 0
+          ? ''
+          : remaining === 0
+            ? ` This closes the balance with ${fullName(target)}.`
+            : remaining > 0
+              ? ` ${fromMinor(remaining)} ${currency} would still be open.`
+              : ` That is ${fromMinor(-remaining)} ${currency} more than is outstanding.`;
+      const preview = `Record a payment: ${fromName} paid ${toName} ${fromMinor(amountMinor)} ${currency} on ${date}.${after} This changes what ${fullName(target)} owes.`;
+
+      deps.metrics.emit({ type: 'preview_shown', tool: 'settle_up' });
+      const payload: SettlePayload = { body, fromName, toName, amount: fromMinor(amountMinor), currency };
+      const state = await deps.codec.mint({
+        kind: 'settle_up',
+        userId: me.id,
+        fingerprint: fp,
+        ...(args.idempotency_key ? { idempotencyKey: args.idempotency_key } : {}),
+        payload,
+      });
+      return inputRequired({
+        inputRequests: { confirm: inputRequired.elicit({ message: `${preview} Record it?`, requestedSchema: ConfirmSchema }) },
         requestState: state,
       });
     }),

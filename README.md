@@ -41,9 +41,11 @@ Your key stays on your machine. Nothing is sent anywhere except Splitwise's own 
 - *"Who's more than 30 days late paying me back?"*
 - *"How do we settle Lisbon?"* — the fewest payments that close the group
 - *"Add dinner 84, I paid, split with everyone"* — shows the split and who it affects, then waits
+- *"Here's a photo of the bill — I had the steak, Priya had the salad"* — splits by item, tax and tip in proportion
+- *"Priya paid me back, record it"* — closes the balance
 - *"Remind Sam, gently"* — drafts a comment in the tone you pick, then waits
 
-Eight tools, three resources, one prompt:
+Ten tools, three resources, one prompt:
 
 | Tool | What it does | Writes? |
 |---|---|---|
@@ -54,9 +56,13 @@ Eight tools, three resources, one prompt:
 | `settle_plan` | Minimum payments to close a group, checked against Splitwise | no |
 | `find_duplicates` | Likely duplicates with a confidence and a suggested action | no |
 | `add_expense` | A sentence or fields, a preview, then a confirmed post | after confirmation |
+| `split_by_items` | A receipt split line by line, tax and tip allocated proportionally | after confirmation |
+| `settle_up` | Records a payment that already happened, closing the balance | after confirmation |
 | `nudge` | A drafted reminder, posted as a comment | after confirmation |
 
 `find_missing_expenses` and `find_duplicates` are two halves of the same job: making the ledger match reality. One finds what's missing from Splitwise, the other finds what's in there twice.
+
+For `split_by_items`, your client reads the receipt and this tool does the arithmetic. That split is deliberate: reading a photo is fuzzy work a model is good at, while allocating tax proportionally and making shares sum exactly to the total is exact work that belongs in code. Pass the printed total and it refuses to post when the lines don't add up, so a misread digit doesn't become five wrong balances.
 
 Resources: `splitwise://groups`, `splitwise://categories`, `splitwise://currencies`. Prompt: `close_out_trip`.
 

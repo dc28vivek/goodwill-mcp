@@ -116,6 +116,14 @@ export interface SwCreateExpenseByShares {
   cost: string;
   description: string;
   group_id: number;
+  /**
+   * Marks the expense as a settlement rather than a shared cost. Not present
+   * in the published OpenAPI schema for create_expense, but accepted by the
+   * API and used by Splitwise's own clients. If it were ever ignored, the
+   * shares still produce the correct balance; it would just display as an
+   * ordinary expense.
+   */
+  payment?: boolean;
   currency_code?: string;
   category_id?: number;
   date?: string;

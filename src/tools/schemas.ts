@@ -127,3 +127,29 @@ export const MissingOutput = z.object({
     }),
   ),
 });
+
+export const SettleOutputWrite = z.object({
+  recorded: z.boolean(),
+  expense_id: z.number().optional(),
+  from: z.string().optional(),
+  to: z.string().optional(),
+  amount: Money.optional(),
+  currency: z.string().optional(),
+  note: z.string(),
+});
+
+export const ReceiptItemInput = z.object({
+  description: z.string().max(120).describe('The line as printed on the receipt.'),
+  amount: Money.describe('Line total, positive decimal string.'),
+  shared_by: z.array(z.string()).min(1).describe('Member names or ids who share this line. One name, several, or everyone.'),
+});
+
+export const ItemSplitOutput = z.object({
+  posted: z.boolean(),
+  expense_id: z.number().optional(),
+  group_id: z.number(),
+  total: Money.optional(),
+  currency: z.string().optional(),
+  breakdown: z.array(z.object({ person: Person, items: Money, extras: Money, owes: Money })).optional(),
+  note: z.string(),
+});

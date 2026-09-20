@@ -6,7 +6,7 @@ import type { Metrics } from './metrics.js';
 
 /** The opaque state we mint for multi round-trip confirmations. */
 export interface PendingWrite {
-  kind: 'add_expense' | 'nudge';
+  kind: 'add_expense' | 'nudge' | 'settle_up' | 'split_by_items';
   /** Splitwise user id of the person confirming. Bound so state cannot be replayed by someone else. */
   userId: number;
   fingerprint: string;

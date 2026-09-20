@@ -174,6 +174,62 @@
     writes.create_expense: 1
   note: The text is posted as data. The model never sees it as an instruction because the preview quotes it.
 
+- id: settle-full
+  prompt: "Priya paid me back for Lisbon, record it"
+  tool: settle_up
+  args: { friend: "Priya", group_id: 100 }
+  answer: accept
+  expect:
+    structured.recorded: true
+    structured.amount: "61.00"
+    prompt_includes: ["Priya S paid you 61.00 EUR", "This closes the balance"]
+    writes.create_expense: 1
+
+- id: settle-declined
+  prompt: "Record that Priya paid me (then say no)"
+  tool: settle_up
+  args: { friend: "Priya", group_id: 100 }
+  answer: decline
+  expect:
+    structured.recorded: false
+    writes.create_expense: 0
+
+- id: receipt-itemised
+  prompt: "Split this receipt: I had the steak 30, Priya had the salad 10, tax 3, tip 5, total 48"
+  tool: split_by_items
+  args:
+    group_id: 100
+    description: "Dinner at Ramiro"
+    currency: EUR
+    items:
+      - { description: "Steak", amount: "30.00", shared_by: ["me"] }
+      - { description: "Salad", amount: "10.00", shared_by: ["Priya"] }
+    tax: "3.00"
+    tip: "5.00"
+    total: "48.00"
+  answer: accept
+  expect:
+    structured.posted: true
+    structured.total: "48.00"
+    prompt_includes: ["Vivek D: 36.00 EUR", "Priya S: 12.00 EUR", "in proportion to what each person ordered"]
+    writes.create_expense: 1
+
+- id: receipt-mismatch
+  prompt: "Split a receipt whose lines were misread"
+  tool: split_by_items
+  args:
+    group_id: 100
+    description: "Misread receipt"
+    currency: EUR
+    items:
+      - { description: "Steak", amount: "30.00", shared_by: ["me"] }
+    tax: "3.00"
+    total: "40.00"
+  expect:
+    isError: true
+    text_includes: ["do not add up", "Nothing was posted"]
+    writes.create_expense: 0
+
 - id: nudge-plain
   prompt: "Remind Priya to pay, plainly"
   tool: nudge
